@@ -17,10 +17,3 @@
 *.pdb
 *.pyc
 .vscode/
-omaha/common/omaha_customization_proxy_clsid.h
-omaha/proxy_clsids.txt
-omaha/scons-out/**
-third_party/breakpad/**
-third_party/googletest/**
-third_party/libzip/**
-third_party/zlib/**
