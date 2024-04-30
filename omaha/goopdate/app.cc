@@ -352,11 +352,11 @@ STDMETHODIMP App::get_currentState(IDispatch** current_state) {
                                &download_time_remaining_ms,
                                &next_download_retry_time);
       if (SUCCEEDED(hr)) {
-        VERIFY1(SUCCEEDED(AppManager::Instance()->WriteDownloadProgress(
+        VERIFY_SUCCEEDED(AppManager::Instance()->WriteDownloadProgress(
                 *this,
                 bytes_downloaded,
                 total_bytes_to_download,
-                download_time_remaining_ms)));
+                download_time_remaining_ms));
       }
       break;
     case STATE_WAITING_TO_INSTALL:
@@ -366,8 +366,8 @@ STDMETHODIMP App::get_currentState(IDispatch** current_state) {
       // we ignore any read errors.
       GetInstallProgress(&install_progress_percentage,
                          &install_time_remaining_ms);
-      VERIFY1(SUCCEEDED(AppManager::Instance()->WriteInstallProgress(
-              *this, install_progress_percentage, install_time_remaining_ms)));
+      VERIFY_SUCCEEDED(AppManager::Instance()->WriteInstallProgress(
+              *this, install_progress_percentage, install_time_remaining_ms));
       break;
     case STATE_INSTALL_COMPLETE:
       install_progress_percentage = 100;
@@ -378,8 +378,8 @@ STDMETHODIMP App::get_currentState(IDispatch** current_state) {
       ASSERT1(completion_result_ == PingEvent::EVENT_RESULT_SUCCESS ||
               completion_result_ == PingEvent::EVENT_RESULT_SUCCESS_REBOOT);
 
-      VERIFY1(SUCCEEDED(AppManager::Instance()->WriteInstallProgress(
-              *this, install_progress_percentage, install_time_remaining_ms)));
+      VERIFY_SUCCEEDED(AppManager::Instance()->WriteInstallProgress(
+              *this, install_progress_percentage, install_time_remaining_ms));
       break;
     case STATE_PAUSED:
       break;
@@ -399,7 +399,7 @@ STDMETHODIMP App::get_currentState(IDispatch** current_state) {
       break;
   }
 
-  VERIFY1(SUCCEEDED(AppManager::Instance()->WriteStateValue(*this, state())));
+  VERIFY_SUCCEEDED(AppManager::Instance()->WriteStateValue(*this, state()));
 
   if (FAILED(hr)) {
     return hr;
@@ -538,6 +538,16 @@ HRESULT App::GetInstallProgress(LONG* install_progress_percentage,
   return S_OK;
 }
 
+HRESULT App::ResetInstallProgress() {
+  ASSERT1(model()->IsLockedByCaller());
+
+  const CString base_key_name(ConfigManager::Instance()->registry_client_state(
+      app_bundle_->is_machine()));
+  const CString app_id_key_name(AppendRegKeyPath(base_key_name,
+                                                 app_guid_string()));
+  return RegKey::DeleteValue(app_id_key_name, kRegValueInstallerProgress);
+}
+
 AppBundle* App::app_bundle() {
   __mutexScope(model()->lock());
   return app_bundle_;
@@ -623,7 +633,6 @@ CurrentState App::state() const {
 
 bool App::is_update() const {
   __mutexScope(model()->lock());
-  ASSERT1(current_version_->version().IsEmpty() != is_update_);
   return is_update_;
 }
 
@@ -907,7 +916,7 @@ void App::AddPingEvent(const PingEventPtr& ping_event) {
 
   CORE_LOG(L3, (_T("[ping event added][%s]"), ping_event->ToString()));
 
-  VERIFY1(SUCCEEDED(app_bundle()->BuildAndPersistPing()));
+  VERIFY_SUCCEEDED(app_bundle()->BuildAndPersistPing());
 }
 
 HRESULT App::CheckGroupPolicy() const {
@@ -917,8 +926,8 @@ HRESULT App::CheckGroupPolicy() const {
     if (!ConfigManager::Instance()->CanUpdateApp(
              app_guid_,
              !app_bundle_->is_auto_update())) {
-      if (ConfigManager::GetEffectivePolicyForAppUpdates(app_guid_) ==
-          kPolicyAutomaticUpdatesOnly) {
+      if (ConfigManager::Instance()->GetEffectivePolicyForAppUpdates(
+          app_guid_, NULL) == kPolicyAutomaticUpdatesOnly) {
         // This return code allows Omaha clients to show a message indicating
         // Manual Updates are disabled, but Automatic Updates are enabled. This
         // is to reassure end-users that administrators have enabled automatic
@@ -929,7 +938,8 @@ HRESULT App::CheckGroupPolicy() const {
       return GOOPDATE_E_APP_UPDATE_DISABLED_BY_POLICY;
     }
   } else {
-    if (!ConfigManager::Instance()->CanInstallApp(app_guid_)) {
+    if (!ConfigManager::Instance()->CanInstallApp(app_guid_,
+                                                  app_bundle_->is_machine())) {
       return GOOPDATE_E_APP_INSTALL_DISABLED_BY_POLICY;
     }
   }
@@ -937,16 +947,23 @@ HRESULT App::CheckGroupPolicy() const {
   return S_OK;
 }
 
+CString App::GetTargetChannel() const {
+  __mutexScope(model()->lock());
+
+  return ConfigManager::Instance()->GetTargetChannel(app_guid_, NULL);
+}
+
 bool App::IsRollbackToTargetVersionAllowed() const {
   __mutexScope(model()->lock());
 
-  return ConfigManager::IsRollbackToTargetVersionAllowed(app_guid_);
+  return ConfigManager::Instance()->IsRollbackToTargetVersionAllowed(app_guid_,
+                                                                     NULL);
 }
 
 CString App::GetTargetVersionPrefix() const {
   __mutexScope(model()->lock());
 
-  return ConfigManager::GetTargetVersionPrefix(app_guid_);
+  return ConfigManager::Instance()->GetTargetVersionPrefix(app_guid_, NULL);
 }
 
 void App::UpdateNumBytesDownloaded(uint64 num_bytes) {
@@ -1041,7 +1058,7 @@ void App::QueueUpdateCheck() {
   if (is_eula_accepted_ == TRISTATE_NONE) {
     CString message;
     StringFormatter formatter(app_bundle_->display_language());
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message));
     Error(ErrorContext(GOOPDATE_E_CALL_UNEXPECTED), message);
   }
 

@@ -69,6 +69,52 @@
 
 namespace omaha {
 
+namespace {
+
+// Checks an open file handle to see if it is a reparse point.
+bool IsReparsePoint(HANDLE file) {
+  if (!file) {
+    return true;
+  }
+
+  BY_HANDLE_FILE_INFORMATION file_info = {};
+  if (!::GetFileInformationByHandle(file, &file_info)) {
+    ::OutputDebugString(SPRINTF(L"LOG_SYSTEM: ERROR - "
+                                L"[::GetFileInformationByHandle failed][%d]",
+                                ::GetLastError()));
+    return true;
+  }
+
+  return (file_info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+}
+
+bool IsEnabledLogToFile() {
+  HKEY key = NULL;
+  int res = ::RegOpenKeyEx(HKEY_LOCAL_MACHINE,
+                           REG_UPDATE_DEV,
+                           0,
+                           KEY_READ,
+                           &key);
+  if (res != ERROR_SUCCESS) {
+    return false;
+  }
+
+  DWORD is_enabled_log_to_file = 0;
+  DWORD bytes = sizeof(is_enabled_log_to_file);
+  DWORD type = REG_DWORD;
+  res = ::RegQueryValueEx(key,
+                          kRegValueIsEnabledLogToFile,
+                          0,
+                          &type,
+                          reinterpret_cast<BYTE*>(&is_enabled_log_to_file),
+                          &bytes);
+  ::RegCloseKey(key);
+
+  return res == ERROR_SUCCESS && type == REG_DWORD && is_enabled_log_to_file;
+}
+
+}  // namespace
+
 // enforce ban on ASSERT/REPORT
 #undef ASSERT
 #undef REPORT
@@ -101,7 +147,6 @@ struct {
   LC_ENTRY(LC_SHELL),
   LC_ENTRY(LC_CORE),
   LC_ENTRY(LC_JS),
-  LC_ENTRY(LC_PLUGIN),
   LC_ENTRY(LC_SERVICE),
   LC_ENTRY(LC_OPT),
   LC_ENTRY(LC_NET),
@@ -182,8 +227,7 @@ Logging::Logging()
       logging_enabled_(true),
       force_show_time_(false),
       show_time_(true),
-      log_to_file_(true),
-      log_file_name_(kDefaultLogFileName),
+      log_to_file_(false),
       log_to_debug_out_(true),
       append_to_file_(true),
       logging_shutdown_(false),
@@ -256,6 +300,8 @@ void Logging::UpdateCatAndLevel(const wchar_t* cat_name, LogCategory cat) {
 }
 
 void Logging::ReadLoggingSettings() {
+  log_to_file_ = IsEnabledLogToFile();
+
   CString config_file = GetCurrentConfigurationFilePath();
   if (!config_file.IsEmpty()) {
     logging_enabled_ = ::GetPrivateProfileInt(
@@ -270,12 +316,6 @@ void Logging::ReadLoggingSettings() {
         kDefaultShowTime,
         config_file) == 0 ? false : true;
 
-    log_to_file_ = ::GetPrivateProfileInt(
-        kConfigSectionLoggingSettings,
-        kConfigAttrLogToFile,
-        kDefaultLogToFile,
-        config_file) == 0 ? false : true;
-
     log_to_debug_out_ = ::GetPrivateProfileInt(
         kConfigSectionLoggingSettings,
         kConfigAttrLogToOutputDebug,
@@ -287,20 +327,11 @@ void Logging::ReadLoggingSettings() {
         kConfigAttrAppendToFile,
         kDefaultAppendToFile,
         config_file) == 0 ? false : true;
-
-    ::GetPrivateProfileString(kConfigSectionLoggingSettings,
-                              kConfigAttrLogFilePath,
-                              kDefaultLogFileName,
-                              CStrBuf(log_file_name_, MAX_PATH),
-                              MAX_PATH,
-                              config_file);
   } else {
     logging_enabled_ = kDefaultLoggingEnabled;
     show_time_ = kDefaultShowTime;
-    log_to_file_ = kDefaultLogToFile;
     log_to_debug_out_ = kDefaultLogToOutputDebug;
     append_to_file_ = kDefaultAppendToFile;
-    log_file_name_ = kDefaultLogFileName;
   }
 
   if (force_show_time_) {
@@ -338,20 +369,12 @@ CString Logging::GetDefaultLogDirectory() const {
 }
 
 CString Logging::GetLogFilePath() const {
-  if (log_file_name_.IsEmpty()) {
-    return CString();
-  }
-
-  if (!ATLPath::IsRelative(log_file_name_)) {
-    return log_file_name_;
-  }
-
   CString path = GetDefaultLogDirectory();
   if (path.IsEmpty()) {
     return CString();
   }
 
-  if (!::PathAppend(CStrBuf(path, MAX_PATH), log_file_name_)) {
+  if (!::PathAppend(CStrBuf(path, MAX_PATH), kDefaultLogFileName)) {
     return CString();
   }
 
@@ -387,8 +410,7 @@ void Logging::ConfigureFileLogWriter() {
       return;
     }
 
-    // Extract the final target directory which will not be what
-    // GetDefaultLogDirectory() returns if log_file_name_ is an absolute path.
+    // Extract the final target directory.
     CString log_file_dir = GetDirectoryFromPath(path);
     if (!File::Exists(log_file_dir)) {
       if (FAILED(CreateDir(log_file_dir, NULL))) {
@@ -943,7 +965,7 @@ bool LogWriter::Register() {
 bool LogWriter::Unregister() {
   Logging* logger = GetLogging();
   if (logger) {
-    return logger->RegisterWriter(this);
+    return logger->UnregisterWriter(this);
   } else {
     return false;
   }
@@ -1081,6 +1103,30 @@ bool FileLogWriter::CreateLoggingFile() {
     // The code in this file is written with the assumption that log_file_ is
     // NULL on creation errors. The easy fix is to set it to NULL here. The
     // long term fix should be implementing it in terms of a smart handle.
+    log_file_ = NULL;
+    return false;
+  }
+
+  // As a defense in depth measure, we check to make sure the parent directory
+  // has not been redirected. i.e., the %LocalAppData%\Google\Update directory.
+  // We do not check %LocalAppData%\Google and above for reparse points, since
+  // an attacker would need to reuse an existing directory structure which has
+  // "\Update", which narrows the attack surface considerably, and in addition,
+  // we only write to a "GoogleUpdate.log" file within, which is unlikely to
+  // affect most applications (such as GoogleUpdate, which has that directory
+  // structure under %ProgramFiles (x86)%).
+  const CString log_file_dir = GetDirectoryFromPath(file_name_);
+  bool is_log_file_dir_reparse_point = true;
+  File::IsReparsePoint(log_file_dir, &is_log_file_dir_reparse_point);
+
+  // Check whether the file or the parent directory are reparse points after
+  // opening the file. The checks are made after opening the file, so that the
+  // attacker does not get a chance to substitute a reparse point.
+  if (is_log_file_dir_reparse_point || IsReparsePoint(log_file_)) {
+    ::OutputDebugString(SPRINTF(L"LOG_SYSTEM: [%s]: ERROR - "
+                              L"Log path %s has a reparse point",
+                              proc_name_, file_name_));
+    ::CloseHandle(log_file_);
     log_file_ = NULL;
     return false;
   }

@@ -36,6 +36,7 @@ namespace omaha {
 //
 #define EXCEPTION_IMPERSONATION_FAILED          0x1
 #define EXCEPTION_REVERT_IMPERSONATION_FAILED   0x2
+#define EXCEPTION_FAILED_TO_GET_THREAD_TOKEN    0x3
 
 //
 // HRESULT Functions.
@@ -96,6 +97,11 @@ const ULONG kFacilityOmaha = 67;
 #define CI_E_BITS_DISABLED                        \
     MAKE_HRESULT(SEVERITY_ERROR, kFacilityOmaha, 0x0030)
 
+// CI_E_BITS_REQUEUED is returned by a BITS request if a job is moved back from
+// transmitting state to queued state due to a user session switch or logoff.
+#define CI_E_BITS_REQUEUED                        \
+    MAKE_HRESULT(SEVERITY_ERROR, kFacilityOmaha, 0x0031)
+
 // CI_E_HTTPS_CERT_FAILURE is returned when the https connection fails.
 // One cause of this is when the system clock is off by a significant
 // amount which makes the server certificate appear invalid.
@@ -123,6 +129,8 @@ const ULONG kFacilityOmaha = 67;
     MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0203)
 #define SIGS_E_INVALID_SIGNATURE                  \
     MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0204)
+#define SIGS_E_FILE_SIZE_TOO_BIG                  \
+    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x0205)
 
 // Crypto error codes.
 // Obsolete: GOOPDATE_E_CRYPT_CANT_CREATE_KEY    0x210
@@ -191,6 +199,9 @@ const ULONG kFacilityOmaha = 67;
 // The file could not be cached.
 #define GOOPDATEDOWNLOAD_E_CACHING_FAILED           \
     MAKE_OMAHA_HRESULT(SEVERITY_ERROR, 0x50D)
+
+#define GOOPDATEDOWNLOAD_E_AUTHENTICODE_VERIFICATION_FAILED \
+    MAKE_OMAHA_HRESULT(SEVERITY_ERROR, 0x50E)
 
 #define GOOPDATEDOWNLOAD_E_FAILED_MOVE              \
     MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0x5FF)
@@ -449,11 +460,12 @@ const ULONG kFacilityOmaha = 67;
 #define GOOGLEUPDATE_COMMANDLINE_E_NO_SCENARIO_HANDLER_MATCHED \
     MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xC01)
 
-// OneClick custom error codes
-#define GOOPDATE_E_ONECLICK_HOSTCHECK_FAILED        \
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xD01)
-#define GOOPDATE_E_ONECLICK_LANGUAGE_NOT_SUPPORTED  \
-    MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xD02)
+// OneClick custom error codes.
+// Obsolete.
+// #define GOOPDATE_E_ONECLICK_HOSTCHECK_FAILED        \
+//     MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xD01)
+// #define GOOPDATE_E_ONECLICK_LANGUAGE_NOT_SUPPORTED  \
+//     MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xD02)
 
 // Usage stats / metrics error codes
 #define GOOPDATE_E_METRICS_LOCK_INIT_FAILED         \

@@ -61,19 +61,19 @@ const TCHAR* const kNonExistentClsid =
     _T("{BC00156D-3B01-4ba3-9F5E-2C46E8B6E824}");
 
 const TCHAR* const kGuid1ClientsKeyPathUser =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME
+    _T("HKCU\\Software\\") PATH_COMPANY_NAME
     _T("\\") PRODUCT_NAME _T("\\Clients\\")
     _T("{21CD0965-0B0E-47cf-B421-2D191C16C0E2}");
 const TCHAR* const kGuid1ClientsKeyPathMachine =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME
+    _T("HKLM\\Software\\") PATH_COMPANY_NAME
     _T("\\") PRODUCT_NAME _T("\\Clients\\")
     _T("{21CD0965-0B0E-47cf-B421-2D191C16C0E2}");
 const TCHAR* const kGuid1ClientStateKeyPathUser =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME
+    _T("HKCU\\Software\\") PATH_COMPANY_NAME
     _T("\\") PRODUCT_NAME _T("\\ClientState\\")
     _T("{21CD0965-0B0E-47cf-B421-2D191C16C0E2}");
 const TCHAR* const kGuid1ClientStateKeyPathMachine =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME
+    _T("HKLM\\Software\\") PATH_COMPANY_NAME
     _T("\\") PRODUCT_NAME _T("\\ClientState\\")
     _T("{21CD0965-0B0E-47cf-B421-2D191C16C0E2}");
 
@@ -258,6 +258,9 @@ class AppManagerTestBase : public AppTestBaseWithRegistryOverride {
           kRegValueDayOfLastRollCall,
           static_cast<DWORD>(num_days_since)));
     }
+
+    ASSERT_SUCCEEDED(app_registry_utils::SetUsageStatsEnable(
+        is_machine, app.app_guid_string(), app.usage_stats_enable()));
   }
 
   // App will be cleaned up when bundle is destroyed.
@@ -266,7 +269,7 @@ class AppManagerTestBase : public AppTestBaseWithRegistryOverride {
   App* CreateAppForRegistryPopulation(const TCHAR* app_id) {
     App* app = NULL;
     EXPECT_SUCCEEDED(
-        dummy_app_bundle_for_app_creation_->createApp(CComBSTR(app_id), &app));
+        test_app_bundle_for_app_creation_->createApp(CComBSTR(app_id), &app));
     ASSERT1(app);
 
     // install_time_diff_sec_ is -1 day for new app. After that, the app
@@ -303,6 +306,7 @@ class AppManagerTestBase : public AppTestBaseWithRegistryOverride {
     expected_app->did_run_ = ACTIVE_RUN;
     expected_app->set_days_since_last_active_ping(3);
     expected_app->set_days_since_last_roll_call(1);
+    expected_app->usage_stats_enable_ = TRISTATE_TRUE;
   }
 
   static void PopulateExpectedApp2(App* expected_app) {
@@ -318,6 +322,7 @@ class AppManagerTestBase : public AppTestBaseWithRegistryOverride {
     expected_app->did_run_ = ACTIVE_NOTRUN;
     expected_app->set_days_since_last_active_ping(100);
     expected_app->set_days_since_last_roll_call(1);
+    expected_app->usage_stats_enable_ = TRISTATE_FALSE;
   }
 
   static void PopulateExpectedUninstalledApp(const CString& uninstalled_version,
@@ -347,21 +352,21 @@ class AppManagerTestBase : public AppTestBaseWithRegistryOverride {
     ASSERT_TRUE(app_manager_);
 
     // Initialize the second bundle.
-    dummy_app_bundle_for_app_creation_ = model_->CreateAppBundle(is_machine_);
-    ASSERT_TRUE(dummy_app_bundle_for_app_creation_.get());
+    test_app_bundle_for_app_creation_ = model_->CreateAppBundle(is_machine_);
+    ASSERT_TRUE(test_app_bundle_for_app_creation_.get());
 
-    EXPECT_SUCCEEDED(dummy_app_bundle_for_app_creation_->put_displayName(
+    EXPECT_SUCCEEDED(test_app_bundle_for_app_creation_->put_displayName(
                          CComBSTR(_T("My Bundle"))));
-    EXPECT_SUCCEEDED(dummy_app_bundle_for_app_creation_->put_displayLanguage(
+    EXPECT_SUCCEEDED(test_app_bundle_for_app_creation_->put_displayLanguage(
                          CComBSTR(_T("en"))));
-    EXPECT_SUCCEEDED(dummy_app_bundle_for_app_creation_->put_installSource(
+    EXPECT_SUCCEEDED(test_app_bundle_for_app_creation_->put_installSource(
                          CComBSTR(_T("unittest"))));
     // TODO(omaha3): Address with the TODO in AppBundleInitializedTest::SetUp().
     if (is_machine_) {
-      SetAppBundleStateForUnitTest(dummy_app_bundle_for_app_creation_.get(),
+      SetAppBundleStateForUnitTest(test_app_bundle_for_app_creation_.get(),
                                    new fsm::AppBundleStateInitialized);
     } else {
-      EXPECT_SUCCEEDED(dummy_app_bundle_for_app_creation_->initialize());
+      EXPECT_SUCCEEDED(test_app_bundle_for_app_creation_->initialize());
     }
 
     EXPECT_SUCCEEDED(app_bundle_->createApp(CComBSTR(kGuid1), &app_));
@@ -1243,7 +1248,7 @@ class AppManagerTestBase : public AppTestBaseWithRegistryOverride {
   // A second bundle is necessary because the same bundle cannot have the same
   // app in it more than once and many of these tests create an app to populate
   // the registry and another to read it.
-  std::shared_ptr<AppBundle> dummy_app_bundle_for_app_creation_;
+  std::shared_ptr<AppBundle> test_app_bundle_for_app_creation_;
 
   const GUID guid1_;
 
@@ -1485,8 +1490,6 @@ TEST_F(AppManagerTest, ConvertCommandLineToProductData_Succeeds) {
   args.is_crash_handler_disabled = true;  // Not used.
   args.is_eula_required_set = true;
   args.is_eula_required_set = true;  // Not used.
-  args.webplugin_urldomain = _T("http://nothing.google.com");  // Not used.
-  args.webplugin_args = _T("blah");  // Not used.
   args.install_source = _T("one_click");
   args.code_red_metainstaller_path = _T("foo.exe");  // Not used.
   args.legacy_manifest_path = _T("bar.exe");  // Not used.
@@ -2133,6 +2136,11 @@ TEST_F(AppManagerReadAppPersistentDataUserTest,
   EXPECT_SUCCEEDED(app_manager_->ReadAppPersistentData(app_));
 
   SetDisplayName(kDefaultAppName, expected_app);
+
+  // This is an unregistered app, and |AppManager::GetAppUsageStatsEnabled|
+  // returns TRISTATE_NONE for unregistered apps.
+  EXPECT_SUCCEEDED(expected_app->put_usageStatsEnable(TRISTATE_NONE));
+
   EXPECT_SUCCEEDED(expected_app->put_isEulaAccepted(VARIANT_TRUE));
   ValidateExpectedValues(*expected_app, *app_);
 }
@@ -2153,6 +2161,11 @@ TEST_F(AppManagerReadAppPersistentDataMachineTest,
   EXPECT_SUCCEEDED(app_manager_->ReadAppPersistentData(app_));
 
   SetDisplayName(kDefaultAppName, expected_app);
+
+  // This is an unregistered app, and |AppManager::GetAppUsageStatsEnabled|
+  // returns TRISTATE_NONE for unregistered apps.
+  EXPECT_SUCCEEDED(expected_app->put_usageStatsEnable(TRISTATE_NONE));
+
   EXPECT_SUCCEEDED(expected_app->put_isEulaAccepted(VARIANT_TRUE));
   ValidateExpectedValues(*expected_app, *app_);
 }

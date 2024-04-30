@@ -27,6 +27,20 @@
 
 namespace omaha {
 
+extern const TCHAR* const kArchAmd64;
+extern const TCHAR* const kArchIntel;
+extern const TCHAR* const kArchArm64;
+extern const TCHAR* const kArchUnknown;
+
+enum VersionType {
+  SUITE_HOME = 0,
+  SUITE_PROFESSIONAL,
+  SUITE_SERVER,
+  SUITE_ENTERPRISE,
+  SUITE_EDUCATION,
+  SUITE_LAST,
+};
+
 // TODO(omaha): refactor to use a namespace.
 class SystemInfo {
  public:
@@ -69,18 +83,32 @@ class SystemInfo {
                                int* service_pack_major,
                                int* service_pack_minor);
 
-  // Returns the processor architecture. We use wProcessorArchitecture in
-  // SYSTEM_INFO returned by ::GetNativeSystemInfo() to detect the processor
-  // architecture of the installed operating system. Note the "Native" in the
-  // function name - this is important. See
-  // http://msdn.microsoft.com/en-us/library/ms724340.aspx.
-  static DWORD GetProcessorArchitecture();
+  // Returns a string representation of the processor architecture, or an empty
+  // string if the processor architecture is unknown. Uses `::IsWow64Process2()`
+  // if available (more accurate). If not, falls back on
+  // `::GetNativeSystemInfo()` (less accurate, but available on most systems).
+  static CString GetArchitecture();
+
+  // Returns `true` if:
+  //* `arch` is empty, or
+  // * `arch` matches the currrent architecture, or
+  // * `arch` is supported on the machine, as determined by
+  // `::IsWow64GuestMachineSupported()`.
+  //   * If `::IsWow64GuestMachineSupported()` is not available, returns `true`
+  //     if `arch` is x86.
+  static bool IsArchitectureSupported(const CString& arch);
 
   // Returns whether this is a 64-bit Windows system.
   static bool Is64BitWindows();
 
   // Retrieves a full OSVERSIONINFOEX struct describing the current OS.
   static HRESULT GetOSVersion(OSVERSIONINFOEX* os_out);
+
+  // Returns a rough bucketing of the type of version of Windows. This is used
+  // to distinguish enterprise enabled versions from home versions
+  // and potentially server versions. Keep this code in sync with Chromium's
+  // base/win/windows_version.cc.
+  static VersionType GetOSVersionType();
 
   // Compares the current OS to the supplied version.  The value of |oper|
   // should be one of the predicate values from VerSetConditionMask() -- for
@@ -90,6 +118,9 @@ class SystemInfo {
   // for example, if |oper| was VER_GREATER and |os| is set to Windows Vista,
   // a machine running Windows 7 or later yields true.
   static bool CompareOSVersions(OSVERSIONINFOEX* os, BYTE oper);
+
+  // Gets the Serial Number of the machine from the BIOS via WMI.
+  static CString GetSerialNumber();
 
  private:
   static bool CompareOSVersionsInternal(OSVERSIONINFOEX* os,

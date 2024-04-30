@@ -15,12 +15,13 @@
 
 #include "omaha/net/network_config.h"
 
+#include <versionhelpers.h>
 #include <winhttp.h>
 #include <atlconv.h>
 #include <atlsecurity.h>
 #include <algorithm>
 #include <memory>
-#include <unordered_set>
+#include <unordered_set>  // NOLINT
 #include <vector>
 
 #include "base/error.h"
@@ -38,6 +39,7 @@
 #include "omaha/base/safe_format.h"
 #include "omaha/base/string.h"
 #include "omaha/base/system.h"
+#include "omaha/base/system_info.h"
 #include "omaha/base/user_info.h"
 #include "omaha/base/utils.h"
 #include "omaha/common/config_manager.h"
@@ -50,19 +52,12 @@ using omaha::encrypt::DecryptData;
 
 namespace omaha {
 
-#if _MSC_VER >= 1900
-using std::unordered_set;
-#else
-template <typename T> using unordered_set = stdext::hash_set<T>;
-#endif
-
-// Computes the hash value of a ProxyConfig object. Names in the stdext
-// namespace are not currently part of the ISO C++ standard.
+// Computes the hash value of a ProxyConfig object.
 size_t hash_value(const ProxyConfig& config) {
-  size_t hash = stdext::hash_value(config.auto_detect)                 ^
-                stdext::hash_value(config.auto_config_url.GetString()) ^
-                stdext::hash_value(config.proxy.GetString())           ^
-                stdext::hash_value(config.proxy_bypass.GetString());
+  size_t hash = std::hash<bool>{}(config.auto_detect)                 ^
+                std::hash<std::wstring>{}(config.auto_config_url.GetString()) ^
+                std::hash<std::wstring>{}(config.proxy.GetString())           ^
+                std::hash<std::wstring>{}(config.proxy_bypass.GetString());
   return hash;
 }
 
@@ -120,14 +115,19 @@ HRESULT NetworkConfig::Initialize() {
     return hr;
   }
 
-  Add(new UpdateDevProxyDetector);
-  Add(new GroupPolicyProxyDetector);
-  BrowserType browser_type(BROWSER_UNKNOWN);
-  GetDefaultBrowserType(&browser_type);
-  if (browser_type == BROWSER_FIREFOX) {
-    Add(new FirefoxProxyDetector);
+  // Allow TLS1.2 on Windows 7 and Windows 8. See KB3140245.
+  // TLS 1.2 is enabled by default on Windows 8.1 and Windows 10.
+  if (::IsWindows7OrGreater() && !::IsWindows8Point1OrGreater()) {
+    constexpr int kSecureProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1 |
+                                     WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_1 |
+                                     WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+    http_client_->SetOptionInt(session_.session_handle,
+                               WINHTTP_OPTION_SECURE_PROTOCOLS,
+                               kSecureProtocols);
   }
-  // There is no Chrome detector because it uses the same proxy settings as IE.
+
+  Add(new UpdateDevProxyDetector);
+  Add(new PolicyProxyDetector);
   Add(new IEWPADProxyDetector);
   Add(new IEPACProxyDetector);
   Add(new IENamedProxyDetector);
@@ -449,15 +449,6 @@ CString NetworkConfig::GetMID() {
   return mid;
 }
 
-CString NetworkConfig::JoinStrings(const TCHAR* s1,
-                                   const TCHAR* s2,
-                                   const TCHAR* delim) {
-  CString result;
-  const TCHAR* components[] = {s1, s2};
-  JoinStringsInArray(components, arraysize(components), delim, &result);
-  return result;
-}
-
 // Using std::hash_set adds about 2K uncompressed code size. Using a CAtlMap
 // adds about 1.5K. Usually, there are only five detected configurations so
 // an O(n^2) algorithm would work well. The advantage of the current
@@ -473,7 +464,7 @@ void NetworkConfig::RemoveDuplicates(std::vector<ProxyConfig>* config) {
   std::vector<ProxyConfig> input(*config);
   config->clear();
 
-  typedef unordered_set<size_t> Keys;
+  typedef std::unordered_set<size_t> Keys;
   Keys keys;
   for (size_t i = 0; i != input.size(); ++i) {
     const size_t hash = hash_value(input[i]);
@@ -603,7 +594,7 @@ GPA_WRAP(jsproxy.dll,
 HRESULT NetworkConfig::GetProxyForUrlLocal(const CString& url,
                                            const CString& path_to_pac_file,
                                            HttpClient::ProxyInfo* proxy_info) {
-  scoped_library jsproxy_lib(::LoadLibrary(_T("jsproxy.dll")));
+  scoped_library jsproxy_lib(LoadSystemLibrary(_T("jsproxy.dll")));
   ASSERT1(jsproxy_lib);
   if (!jsproxy_lib) {
     HRESULT hr = HRESULTFromLastError();
@@ -747,7 +738,7 @@ void NetworkConfigManager::DeleteInstance() {
 NetworkConfigManager& NetworkConfigManager::Instance() {
   __mutexScope(instance_lock_);
   if (!instance_) {
-    VERIFY1(SUCCEEDED(NetworkConfigManager::CreateInstance()));
+    VERIFY_SUCCEEDED(NetworkConfigManager::CreateInstance());
   }
   return *instance_;
 }

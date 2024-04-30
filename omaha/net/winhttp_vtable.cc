@@ -15,6 +15,8 @@
 
 #include "omaha/net/winhttp_vtable.h"
 
+#include "omaha/base/utils.h"
+
 namespace omaha {
 
 bool WinHttpVTable::Load() {
@@ -22,9 +24,9 @@ bool WinHttpVTable::Load() {
     return true;
   }
   Clear();
-  library_ = ::LoadLibrary(_T("winhttp"));
+  library_ = LoadSystemLibrary(_T("winhttp"));
   if (!library_) {
-    library_ = ::LoadLibrary(_T("winhttp5"));
+    library_ = LoadSystemLibrary(_T("winhttp5"));
     if (!library_) {
       return false;
     }

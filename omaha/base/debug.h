@@ -23,9 +23,12 @@
 //
 // #define ASSERT_IN_RELEASE
 
-#include "omaha/base/atlassert.h"
 #include "omaha/base/synchronized.h"
 #include "omaha/base/time.h"
+
+#define CONCATENATE_DIRECT(s1, s2) s1##s2
+#define CONCATENATE(s1, s2) CONCATENATE_DIRECT(s1, s2)
+#define ANONYMOUS_VARIABLE(str) CONCATENATE(str, __LINE__)
 
 namespace omaha {
 
@@ -43,6 +46,20 @@ extern volatile LONG g_debugassertrecursioncheck;
 extern bool g_always_assert;
 
 const int kMaxStackTraceDialogLen = 512;  // too long and dialog box fails
+
+enum ReportType {
+  R_INFO = 1,   // Not an error, used for accumulating statistics.
+  R_WARNING,    // May or may not be an error.
+  R_ERROR,      // Definitely an error.
+  R_FATAL       // halt program == ASSERT for release mode.
+};
+
+enum DebugReportKind {
+  DEBUGREPORT_NONE   = 0,
+  DEBUGREPORT_ASSERT = 1,
+  DEBUGREPORT_REPORT = 2,
+  DEBUGREPORT_ABORT  = 3
+};
 
 // TODO(omaha): consider merging this into DebugObserver.
 //
@@ -199,12 +216,13 @@ class ReportIds : public GLock {
   void TraceError(DWORD error);
   inline void TraceLastError() { TraceError(GetLastError()); }
 
-  /**
-  * Iterates through HKEY_CLASSES_ROOT\Interface and calls QI for
-  * all the interfaces there.  Useful for finding out what type of
-  * object you're dealing with :-)
-  */
-  void DumpInterface(IUnknown* unknown);
+  #define VERIFY_SUCCEEDED(hr)                        \
+  do {                                                \
+    const auto ANONYMOUS_VARIABLE(__hr) = (hr);                        \
+    if (FAILED(ANONYMOUS_VARIABLE(__hr))) {                            \
+      VERIFY(false, (L"FAILED(hr): %#08x", ANONYMOUS_VARIABLE(__hr))); \
+    }                                                 \
+  } while (0)
 
 #else  // #ifdef _DEBUG
 
@@ -224,6 +242,8 @@ class ReportIds : public GLock {
     do {                   \
       (expr);              \
     } while (0)
+  #define VERIFY_SUCCEEDED(hr) do { (hr); } while(0)
+
   #define REPORT(expr, type, msg, id) \
       ((expr) ? 0 : g_report_ids.ReleaseReport(id))
   void ReleaseAbort(const TCHAR* msg,

@@ -16,11 +16,12 @@
 #include <ATLComTime.h>
 #include <atltypes.h>
 #include <atlwin.h>
+
 #include <map>
 #include <vector>
+
 #include "base/rand_util.h"
 #include "omaha/base/app_util.h"
-#include "omaha/base/atl_regexp.h"
 #include "omaha/base/constants.h"
 #include "omaha/base/dynamic_link_kernel32.h"
 #include "omaha/base/file.h"
@@ -144,7 +145,7 @@ TEST(UtilsTest, ReadEntireFile) {
   ASSERT_FAILED(ReadEntireFile(L"C:\\F00Bar\\ImaginaryFile", 0, &buffer));
 
   ASSERT_SUCCEEDED(ReadEntireFile(file_name, 0, &buffer));
-  ASSERT_EQ(9405, buffer.size());
+  ASSERT_TRUE(9405 == buffer.size() /*LF*/ || 9514 == buffer.size() /*CRLF*/);
   buffer.resize(0);
   ASSERT_FAILED(ReadEntireFile(L"C:\\WINDOWS\\Greenstone.bmp", 1000, &buffer));
 }
@@ -152,27 +153,6 @@ TEST(UtilsTest, ReadEntireFile) {
 // TODO(omaha): Need a test for WriteEntireFile
 // TEST(UtilsTest, WriteEntireFile) {
 // }
-
-TEST(UtilsTest, RegSplitKeyvalueName) {
-  CString key_name, value_name;
-  ASSERT_SUCCEEDED(RegSplitKeyvalueName(CString(L"HKLM\\Foo\\"),
-                                        &key_name,
-                                        &value_name));
-  ASSERT_STREQ(key_name, L"HKLM\\Foo");
-  ASSERT_TRUE(value_name.IsEmpty());
-
-  ASSERT_SUCCEEDED(RegSplitKeyvalueName(CString(L"HKLM\\Foo\\(default)"),
-                                        &key_name,
-                                        &value_name));
-  ASSERT_STREQ(key_name, L"HKLM\\Foo");
-  ASSERT_TRUE(value_name.IsEmpty());
-
-  ASSERT_SUCCEEDED(RegSplitKeyvalueName(CString(L"HKLM\\Foo\\Bar"),
-                                        &key_name,
-                                        &value_name));
-  ASSERT_STREQ(key_name, L"HKLM\\Foo");
-  ASSERT_STREQ(value_name, L"Bar");
-}
 
 TEST(UtilsTest, ExpandEnvLikeStrings) {
   std::map<CString, CString> mapping;
@@ -404,10 +384,6 @@ TEST(UtilsTest, IsUserLoggedOn) {
   ASSERT_TRUE(is_logged_on);
 }
 
-TEST(UtilsTest, IsClickOnceDisabled) {
-  EXPECT_FALSE(IsClickOnceDisabled());
-}
-
 TEST(UtilsTest, ConfigureRunAtStartup) {
   const TCHAR kRunKeyPath[] =
       _T("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run");
@@ -551,15 +527,7 @@ TEST(UtilsTest, GetCurrentUserDefaultSecurityAttributes) {
 }
 
 TEST(UtilsTest, AddAllowedAce) {
-  CString test_file_path = ConcatenatePath(
-      app_util::GetCurrentModuleDirectory(), _T("TestAddAllowedAce.exe"));
-  EXPECT_SUCCEEDED(File::Remove(test_file_path));
-
-  EXPECT_SUCCEEDED(File::Copy(
-      ConcatenatePath(app_util::GetCurrentModuleDirectory(),
-                      _T("GoogleUpdate.exe")),
-      test_file_path,
-      false));
+  const CString test_file_path(GetTempFilename(_T("AddAllowedAce_")));
 
   CDacl dacl;
   EXPECT_TRUE(AtlGetDacl(test_file_path, SE_FILE_OBJECT, &dacl));
@@ -568,7 +536,7 @@ TEST(UtilsTest, AddAllowedAce) {
   EXPECT_SUCCEEDED(AddAllowedAce(test_file_path,
                                  SE_FILE_OBJECT,
                                  Sids::Dialup(),
-                                 FILE_GENERIC_READ,
+                                 FILE_GENERIC_WRITE,
                                  0));
 
   dacl.SetEmpty();
@@ -579,18 +547,18 @@ TEST(UtilsTest, AddAllowedAce) {
   EXPECT_SUCCEEDED(AddAllowedAce(test_file_path,
                                  SE_FILE_OBJECT,
                                  Sids::Dialup(),
-                                 FILE_GENERIC_READ,
+                                 FILE_GENERIC_WRITE,
                                  0));
   dacl.SetEmpty();
   EXPECT_TRUE(AtlGetDacl(test_file_path, SE_FILE_OBJECT, &dacl));
   EXPECT_EQ(original_ace_count + 1, dacl.GetAceCount());
 
   // Add a subset of the existing access. No ACE is added.
-  EXPECT_EQ(FILE_READ_ATTRIBUTES, FILE_GENERIC_READ & FILE_READ_ATTRIBUTES);
+  EXPECT_EQ(FILE_WRITE_ATTRIBUTES, FILE_GENERIC_WRITE & FILE_WRITE_ATTRIBUTES);
   EXPECT_SUCCEEDED(AddAllowedAce(test_file_path,
                                  SE_FILE_OBJECT,
                                  Sids::Dialup(),
-                                 FILE_READ_ATTRIBUTES,
+                                 FILE_WRITE_ATTRIBUTES,
                                  0));
   dacl.SetEmpty();
   EXPECT_TRUE(AtlGetDacl(test_file_path, SE_FILE_OBJECT, &dacl));
@@ -717,38 +685,29 @@ TEST(UtilsTest, interlocked_exchange_pointer) {
   EXPECT_EQ(static_cast<int*>(NULL), pi);
 }
 
-TEST(UtilsTest, GetGuid)  {
+TEST(UtilsTest, GetGuid) {
   CString guid;
   EXPECT_HRESULT_SUCCEEDED(GetGuid(&guid));
 
-  // ATL regexp has many problems including:
-  // * not supporting {n} to repeat a previous item n times.
-  // * not allowing matching on - unless the items around the dash are
-  // enclosed in {}.
-  AtlRE guid_regex(_T("^{\\{{\\h\\h\\h\\h\\h\\h\\h\\h}-{\\h\\h\\h\\h}-{\\h\\h\\h\\h}-{\\h\\h\\h\\h}-{\\h\\h\\h\\h\\h\\h\\h\\h\\h\\h\\h\\h}\\}}$"));   // NOLINT
-
-  CString matched_guid;
-  EXPECT_TRUE(AtlRE::PartialMatch(guid, guid_regex, &matched_guid));
-  EXPECT_STREQ(guid, matched_guid);
+  IID iid = {0};
+  EXPECT_HRESULT_SUCCEEDED(::IIDFromString(guid, &iid));
 
   // Missing {}.
-  guid = _T("5F5280C6-9674-429b-9FEB-551914EF96B8");
-  EXPECT_FALSE(AtlRE::PartialMatch(guid, guid_regex));
+  EXPECT_HRESULT_FAILED(
+      ::IIDFromString(_T("5F5280C6-9674-429b-9FEB-551914EF96B8"), &iid));
 
   // Missing -.
-  guid = _T("{5F5280C6.9674-429b-9FEB-551914EF96B8}");
-  EXPECT_FALSE(AtlRE::PartialMatch(guid, guid_regex));
+  EXPECT_HRESULT_FAILED(
+      ::IIDFromString(_T("{5F5280C6.9674-429b-9FEB-551914EF96B8}"), &iid));
 
   // Whitespaces.
-  guid = _T(" {5F5280C6.9674-429b-9FEB-551914EF96B8}");
-  EXPECT_FALSE(AtlRE::PartialMatch(guid, guid_regex));
-
-  guid = _T("{5F5280C6.9674-429b-9FEB-551914EF96B8} ");
-  EXPECT_FALSE(AtlRE::PartialMatch(guid, guid_regex));
+  EXPECT_HRESULT_FAILED(
+      ::IIDFromString(_T(" {5F5280C6-9674-429b-9FEB-551914EF96B8}"), &iid));
+  EXPECT_HRESULT_FAILED(
+      ::IIDFromString(_T("{5F5280C6-9674-429b-9FEB-551914EF96B8} "), &iid));
 
   // Empty string.
-  guid = _T("");
-  EXPECT_FALSE(AtlRE::PartialMatch(guid, guid_regex));
+    EXPECT_HRESULT_FAILED(::IIDFromString(_T(""), &iid));
 }
 
 TEST(UtilsTest, GetMessageForSystemErrorCode) {
@@ -986,6 +945,13 @@ TEST(UtilsTest, DeleteDirectoryContents_FilesAndDirs) {
   EXPECT_TRUE(::PathIsDirectoryEmpty(source_dir));
 
   EXPECT_SUCCEEDED(DeleteDirectory(source_dir));
+}
+
+TEST(UtilsTest, LoadSystemLibrary) {
+ scoped_library winhttp_dll(LoadSystemLibrary(_T("winhttp.dll")));
+ EXPECT_TRUE(winhttp_dll);
+ scoped_library no_dll(LoadSystemLibrary(_T("no_such_dll.dll")));
+ EXPECT_FALSE(no_dll);
 }
 
 }  // namespace omaha

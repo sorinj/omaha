@@ -20,10 +20,7 @@
 
 namespace omaha {
 
-//
-// Externally initiated modes.
-// These modes are invoked by or on metainstallers or by the OneClick plugin  .
-//
+// Externally initiated modes. These modes are invoked by metainstallers.
 
 // The "install" switch indicates installing Omaha and the app.
 const TCHAR* const kCmdLineInstall = _T("install");
@@ -37,12 +34,6 @@ const TCHAR* const kCmdLineUpdate = _T("update");
 // The "recover" switch indicates Omaha is to be repaired due to a
 // Code Red scenario.
 const TCHAR* const kCmdLineRecover = _T("recover");
-
-// The "pi" switch indicates that this came from a webplugin.
-// Requires two subarguments "siteurl" and "{args}" where
-// siteurl is the base URL where the plugin ran from and {args}
-// are the args to pass on once validation is complete.
-const TCHAR* const kCmdLineWebPlugin = _T("pi");
 
 //
 // Main operating modes
@@ -158,9 +149,6 @@ const TCHAR* const kCmdLinePing = _T("ping");
 // These are used for debug, testing, etc.
 //
 
-// Run network diagnostics.
-const TCHAR* const kCmdLineNetDiags = _T("netdiags");
-
 // The "crash" switch indicates that Omaha should crash upon startup.
 // This option is used to test the crash reporting system.
 const TCHAR* const kCmdLineCrash = _T("crash");
@@ -172,6 +160,10 @@ const TCHAR* const kCmdLineCrash = _T("crash");
 // The "silent" switch specifies that normally interactive modes should run
 // silently.
 const TCHAR* const kCmdLineSilent = _T("silent");
+
+// The "alwayslaunchcmd" switch specifies that the launch command is to be
+// executed unconditionally, even for silent modes.
+const TCHAR* const kCmdLineAlwaysLaunchCmd = _T("alwayslaunchcmd");
 
 const TCHAR* const kCmdLineLegacyOfflineInstall = _T("offlineinstall");
 const TCHAR* const kCmdLineOfflineDir = _T("offlinedir");
@@ -204,13 +196,12 @@ const TCHAR* const kCmdLineInteractive = _T("i");
 const TCHAR* const kCmdLineSessionId = _T("sessionid");
 
 // The "installsource" switch that is used to pass the source of installation
-// for ping tracking.  For example:  "/installsource OneClick".
+// for ping tracking.  For example:  "/installsource taggedmi".
 const TCHAR* const kCmdLineInstallSource = _T("installsource");
 
 // "installsource" values generated internally by Omaha. The server code needs
 // to be updated when these values change or new values are defined.
 const TCHAR* const kCmdLineInstallSource_TaggedMetainstaller = _T("taggedmi");
-const TCHAR* const kCmdLineInstallSource_OneClick = _T("oneclick");
 const TCHAR* const kCmdLineInstallSource_ClickOnce = _T("clickonce");
 const TCHAR* const kCmdLineInstallSource_Offline = _T("offline");
 const TCHAR* const kCmdLineInstallSource_InstallDefault = _T("otherinstallcmd");
@@ -297,11 +288,22 @@ const TCHAR* const kExtraArgTTToken = _T("tttoken");
 // successful install.
 const TCHAR* const kExtraArgBrowserType = _T("browser");
 
-// "runtime" extra argument tells Omaha to only install itself, staying on
-// the system without any associated application for at least 24 hours.
+// Runtime Mode:
+// * "runtime" extra argument of "true" tells Omaha to only install itself,
+// staying on the system without any associated application for at least 24
+// hours.
 // This is used to expose our COM API to a process that will install
 // applications via that API after the meta-installer exits.
-const TCHAR* const kExtraArgRuntime = _T("runtime");
+//
+// * "runtime" extra argument of "persist" tells Omaha to only install itself,
+// staying persisted indefinitely on the system without any associated
+// application.
+// This is used to allow Enterprises to Push application installs to individual
+// machines using Policy.
+//
+// * "runtime" extra argument of "false" tells Omaha that it can uninstall
+// itself if there are no registered apps.
+const TCHAR* const kExtraArgRuntimeMode = _T("runtime");
 
 #if defined(HAS_DEVICE_MANAGEMENT)
 

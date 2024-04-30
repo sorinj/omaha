@@ -20,6 +20,8 @@
 #include <string>
 #include <map>
 
+#include "omaha/base/utils.h"
+
 typedef void (*DebugeeFunction)(void);
 typedef std::map<std::wstring, DebugeeFunction> DebugeeMap;
 DebugeeMap debugee_map;
@@ -43,7 +45,7 @@ void MaxExecMappings() {
 }
 
 void NtFunctionsOnStack() {
-  HMODULE ntdll = ::LoadLibraryA("ntdll.dll");
+  HMODULE ntdll = omaha::LoadSystemLibrary(_T("ntdll.dll"));
   FARPROC ptr = ::GetProcAddress(ntdll, "ZwProtectVirtualMemory");
   AwaitTheReaper();
 }
@@ -62,7 +64,8 @@ void TestWildStackPointer() {
 
 void TestPENotInModuleList() {
   MEMORY_BASIC_INFORMATION mbi = {0};
-  BYTE* ntdll = reinterpret_cast<BYTE*>(::LoadLibraryA("ntdll.dll"));
+  BYTE* ntdll = reinterpret_cast<BYTE*>(
+      omaha::LoadSystemLibrary(_T("ntdll.dll")));
   ::VirtualQuery(ntdll, &mbi, sizeof(mbi));
   LPVOID buffer = ::VirtualAlloc(NULL,
                                  mbi.RegionSize,

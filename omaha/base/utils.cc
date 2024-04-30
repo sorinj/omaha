@@ -34,9 +34,11 @@
 #include "omaha/base/const_timeouts.h"
 #include "omaha/base/const_object_names.h"
 #include "omaha/base/file.h"
+#include "omaha/base/path.h"
 #include "omaha/base/process.h"
 #include "omaha/base/safe_format.h"
 #include "omaha/base/scope_guard.h"
+#include "omaha/base/scoped_impersonation.h"
 #include "omaha/base/shell.h"
 #include "omaha/base/string.h"
 #include "omaha/base/system.h"
@@ -51,9 +53,8 @@ namespace omaha {
 namespace {
 
 // Private object namespaces for Vista processes.
-const TCHAR* const kGoopdateBoundaryDescriptor = _T("GoogleUpdate_BD");
-const TCHAR* const kGoopdatePrivateNamespace = _T("GoogleUpdate");
-const TCHAR* const kGoopdatePrivateNamespacePrefix = _T("GoogleUpdate\\");
+const TCHAR* const kGoopdateBoundaryDescriptor = MAIN_EXE_BASE_NAME _T("_BD");
+const TCHAR* const kGoopdatePrivateNamespace = MAIN_EXE_BASE_NAME;
 
 // Helper for IsPrivateNamespaceAvailable().
 // For simplicity, the handles opened here are leaked. We need these until
@@ -111,6 +112,28 @@ bool EnsurePrivateNamespaceAvailable() {
   ASSERT(namespace_handle, (_T("[Could not open private namespace][%d]"),
                             ::GetLastError()));
   return false;
+}
+
+// Returns true if AddDllDirectory function is available, meaning
+// LOAD_LIBRARY_SEARCH_* flags are available on the host system.
+bool AreSearchFlagsAvailable() {
+  // The LOAD_LIBRARY_SEARCH_* flags are available on systems that have
+  // KB2533623 installed. To determine whether the flags are available, use
+  // GetProcAddress to get the address of the AddDllDirectory,
+  // RemoveDllDirectory, or SetDefaultDllDirectories function. If GetProcAddress
+  // succeeds, the LOAD_LIBRARY_SEARCH_* flags can be used with LoadLibraryEx.
+  static const auto add_dll_dir_func =
+      reinterpret_cast<decltype(AddDllDirectory)*>(
+          GetProcAddress(GetModuleHandle(_T("kernel32.dll")),
+                                         "AddDllDirectory"));
+  return !!add_dll_dir_func;
+}
+
+HMODULE LoadSystemLibraryHelper(const CString& library_path) {
+  const DWORD kFlags = AreSearchFlagsAvailable()
+      ? LOAD_LIBRARY_SEARCH_SYSTEM32
+      : LOAD_WITH_ALTERED_SEARCH_PATH;
+  return ::LoadLibraryExW(library_path.GetString(), nullptr, kFlags);
 }
 
 }  // namespace
@@ -407,7 +430,7 @@ void GetNamedObjectAttributes(const TCHAR* base_name,
 
   if (!is_machine) {
     CString user_sid;
-    VERIFY1(SUCCEEDED(omaha::user_info::GetProcessUser(NULL, NULL, &user_sid)));
+    VERIFY_SUCCEEDED(omaha::user_info::GetProcessUser(NULL, NULL, &user_sid));
     attr->name += user_sid;
     VERIFY1(GetCurrentUserDefaultSecurityAttributes(&attr->sa));
   } else {
@@ -457,78 +480,6 @@ HRESULT AddAllowedAce(const TCHAR* object_name,
     return HRESULTFromLastError();
   }
 
-  return S_OK;
-}
-
-HRESULT CreateDir(const TCHAR* in_dir,
-                  LPSECURITY_ATTRIBUTES security_attr) {
-  ASSERT1(in_dir);
-  CString path;
-  if (!PathCanonicalize(CStrBuf(path, MAX_PATH), in_dir)) {
-    return E_FAIL;
-  }
-  // Standardize path on backslash so Find works.
-  path.Replace(_T('/'), _T('\\'));
-  int next_slash = path.Find(_T('\\'));
-  while (true) {
-    int len = 0;
-    if (next_slash == -1) {
-      len = path.GetLength();
-    } else {
-      len = next_slash;
-    }
-    CString dir(path.Left(len));
-    // The check for File::Exists should not be needed. However in certain
-    // cases, i.e. when the program is run from a n/w drive or from the
-    // root drive location, the first CreateDirectory fails with an
-    // E_ACCESSDENIED instead of a ALREADY_EXISTS. Hence we protect the call
-    // with the exists.
-    if (!File::Exists(dir)) {
-      if (!::CreateDirectory(dir, security_attr)) {
-        DWORD error = ::GetLastError();
-        if (ERROR_FILE_EXISTS != error && ERROR_ALREADY_EXISTS != error) {
-          return HRESULT_FROM_WIN32(error);
-        }
-      }
-    }
-    if (next_slash == -1) {
-      break;
-    }
-    next_slash = path.Find(_T('\\'), next_slash + 1);
-  }
-
-  return S_OK;
-}
-
-HRESULT GetFolderPath(int csidl, CString* path) {
-  if (!path) {
-    return E_INVALIDARG;
-  }
-  path->Empty();
-
-  TCHAR buffer[MAX_PATH] = {0};
-  HRESULT hr = ::SHGetFolderPath(NULL, csidl, NULL, SHGFP_TYPE_CURRENT, buffer);
-  if (FAILED(hr)) {
-    UTIL_LOG(LW, (_T("SHGetFolderPath failed][%d][%#x]"), csidl, hr));
-
-    // In locked-down environments or with registry redirection,
-    // ::SHGetFolderPath can fail. We try to fall back on environment variables
-    // for the CSIDL values below.
-    csidl &= CSIDL_FLAG_MASK ^ 0xFFFF;
-    if (csidl == CSIDL_PROGRAM_FILES) {
-      *path = GetEnvironmentVariableAsString(_T("ProgramFiles"));
-    } else if (csidl == CSIDL_LOCAL_APPDATA) {
-      *path = GetEnvironmentVariableAsString(_T("LocalAppData"));
-    }
-
-    if (!path->IsEmpty()) {
-      return S_FALSE;
-    }
-
-    return hr;
-  }
-
-  *path = buffer;
   return S_OK;
 }
 
@@ -651,8 +602,9 @@ HRESULT DeleteDirectory(const TCHAR* dir_name) {
     else
       return HRESULTFromLastError();
   }
-  // Confirm it is a directory
-  if (!(dir_attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+  // Confirm it is a non-redirected directory.
+  if (!(dir_attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+      (dir_attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
     return E_FAIL;
   }
 
@@ -753,11 +705,13 @@ HRESULT DeleteBeforeOrAfterReboot(const TCHAR* targetname) {
   }
 
   HRESULT hr = E_FAIL;
+  bool is_reparse_point = true;
   if (File::IsDirectory(targetname)) {
     // DeleteDirectory will schedule deletion at next reboot if it cannot delete
     // immediately.
     hr = DeleteDirectory(targetname);
-  } else  {
+  } else if (SUCCEEDED(File::IsReparsePoint(targetname, &is_reparse_point)) &&
+             !is_reparse_point) {
     hr = File::Remove(targetname);
     // If failed, schedule deletion at next reboot
     if (FAILED(hr)) {
@@ -1429,84 +1383,6 @@ HRESULT WriteEntireFile(const TCHAR * filepath,
   return S_OK;
 }
 
-// Conversions between a byte stream and a std::string
-HRESULT BufferToString(const std::vector<byte>& buffer_in, CStringA* str_out) {
-  ASSERT1(str_out);
-
-  if (buffer_in.size() > INT_MAX) {
-    return E_INVALIDARG;
-  }
-
-  str_out->Append(reinterpret_cast<const char*>(&buffer_in.front()),
-                  static_cast<int>(buffer_in.size()));
-  return S_OK;
-}
-
-HRESULT StringToBuffer(const CStringA& str_in, std::vector<byte>* buffer_out) {
-  ASSERT1(buffer_out);
-  buffer_out->assign(str_in.GetString(),
-                     str_in.GetString() + str_in.GetLength());
-  return S_OK;
-}
-
-HRESULT BufferToString(const std::vector<byte>& buffer_in, CString* str_out) {
-  ASSERT1(str_out);
-
-  const size_t len2 = buffer_in.size();
-  ASSERT1(len2 % 2 == 0);
-  const size_t len = len2 / 2;
-
-  if (len > INT_MAX) {
-    return E_INVALIDARG;
-  }
-
-  str_out->Append(reinterpret_cast<const TCHAR*>(&buffer_in.front()),
-                  static_cast<int>(len));
-
-  return S_OK;
-}
-
-HRESULT StringToBuffer(const CString& str_in, std::vector<byte>* buffer_out) {
-  ASSERT1(buffer_out);
-
-  size_t len = str_in.GetLength();
-  size_t len2 = len * 2;
-
-  buffer_out->resize(len2);
-  ::memcpy(&buffer_out->front(), str_in.GetString(), len2);
-
-  return S_OK;
-}
-
-HRESULT RegSplitKeyvalueName(const CString& keyvalue_name,
-                             CString* key_name,
-                             CString* value_name) {
-  ASSERT1(key_name);
-  ASSERT1(value_name);
-
-  const TCHAR kDefault[] = _T("\\(default)");
-
-  if (String_EndsWith(keyvalue_name, _T("\\"), false)) {
-    key_name->SetString(keyvalue_name, keyvalue_name.GetLength() - 1);
-    value_name->Empty();
-  } else if (String_EndsWith(keyvalue_name, kDefault, true)) {
-    key_name->SetString(keyvalue_name,
-                        keyvalue_name.GetLength() - TSTR_SIZE(kDefault));
-    value_name->Empty();
-  } else {
-    int last_slash = String_ReverseFindChar(keyvalue_name, _T('\\'));
-    if (last_slash == -1) {
-      // No slash found - bizzare and wrong
-      return E_FAIL;
-    }
-    key_name->SetString(keyvalue_name, last_slash);
-    value_name->SetString(keyvalue_name.GetString() + last_slash + 1,
-                          keyvalue_name.GetLength() - last_slash - 1);
-  }
-
-  return S_OK;
-}
-
 HRESULT ExpandEnvLikeStrings(const TCHAR* src,
                              const std::map<CString, CString>& keywords,
                              CString* dest) {
@@ -1616,13 +1492,13 @@ void VariantToStringList(VARIANT var, std::vector<CString>* list) {
   ASSERT1(obj);
 
   CComVariant var_length;
-  VERIFY1(SUCCEEDED(obj.GetPropertyByName(_T("length"), &var_length)));
+  VERIFY_SUCCEEDED(obj.GetPropertyByName(_T("length"), &var_length));
   ASSERT1(V_VT(&var_length) == VT_I4);
   int length = V_I4(&var_length);
 
   for (int i = 0; i < length; ++i) {
     CComVariant value;
-    VERIFY1(SUCCEEDED(obj.GetPropertyByName(itostr(i), &value)));
+    VERIFY_SUCCEEDED(obj.GetPropertyByName(itostr(i), &value));
     if (V_VT(&value) == VT_BSTR) {
       list->push_back(V_BSTR(&value));
     } else {
@@ -1887,33 +1763,17 @@ HRESULT IsUserLoggedOn(bool* is_logged_on) {
   return UserRights::UserIsLoggedOnInteractively(is_logged_on);
 }
 
-bool IsClickOnceDisabled() {
-  CComPtr<IInternetZoneManager> zone_mgr;
-  HRESULT hr =  zone_mgr.CoCreateInstance(CLSID_InternetZoneManager);
-  if (FAILED(hr)) {
-    UTIL_LOG(LE, (_T("[InternetZoneManager CreateInstance fail][0x%08x]"), hr));
-    return true;
-  }
-
-  DWORD policy = URLPOLICY_DISALLOW;
-  const DWORD policy_size = sizeof(policy);
-  hr = zone_mgr->GetZoneActionPolicy(URLZONE_INTERNET,
-                                     URLACTION_MANAGED_UNSIGNED,
-                                     reinterpret_cast<BYTE*>(&policy),
-                                     policy_size,
-                                     URLZONEREG_DEFAULT);
-  if (FAILED(hr)) {
-    UTIL_LOG(LE, (_T("[GetZoneActionPolicy failed][0x%08x]"), hr));
-    return true;
-  }
-
-  return policy == URLPOLICY_DISALLOW;
-}
-
 bool ShellExecuteExEnsureParent(LPSHELLEXECUTEINFO shell_exec_info) {
   UTIL_LOG(L3, (_T("[ShellExecuteExEnsureParent]")));
 
   ASSERT1(shell_exec_info);
+
+  // Prevents elevation of privilege by reverting to the process token before
+  // starting the process. Otherwise, a lower privilege token could for instance
+  // symlink `C:\` to a different folder (per-user DosDevice) and allow an
+  // elevation of privilege attack.
+  scoped_revert_to_self revert_to_self;
+
   bool shell_exec_succeeded(false);
   DWORD last_error(ERROR_SUCCESS);
 
@@ -1927,7 +1787,7 @@ bool ShellExecuteExEnsureParent(LPSHELLEXECUTEINFO shell_exec_info) {
 
       if (!hwnd_parent) {
         last_error = ::GetLastError();
-        UTIL_LOG(LE, (_T("[CreateDummyOverlappedWindow failed]")));
+        UTIL_LOG(LE, (_T("[CreateForegroundParentWindowForUAC failed]")));
         // Restore last error in case the logging reset it.
         ::SetLastError(last_error);
         return false;
@@ -2048,23 +1908,6 @@ HRESULT WaitForMSIExecute(int timeout_ms) {
   }
 }
 
-CString GetEnvironmentVariableAsString(const TCHAR* name) {
-  UTIL_LOG(L6, (_T("GetEnvironmentVariableAsString][%s]"), name));
-
-  CString value;
-  DWORD value_length = ::GetEnvironmentVariable(name, NULL, 0);
-  if (value_length) {
-    VERIFY1(::GetEnvironmentVariable(name,
-                                     CStrBuf(value, value_length),
-                                     value_length));
-  } else {
-    HRESULT hr = HRESULTFromLastError();
-    UTIL_LOG(LW, (_T("GetEnvironmentVariable failed][%s][%#x]"), name, hr));
-  }
-
-  return value;
-}
-
 // States are documented at
 // http://technet.microsoft.com/en-us/library/cc721913.aspx.
 bool IsWindowsInstalling() {
@@ -2157,20 +2000,6 @@ CString GetTempFilename(const TCHAR* prefix) {
   return GetTempFilenameAt(temp_dir, prefix);
 }
 
-CString GetTempFilenameAt(const TCHAR* dir, const TCHAR* prefix) {
-  ASSERT1(dir);
-  ASSERT1(prefix);
-
-  CString temp_file;
-  UINT result = ::GetTempFileName(dir, prefix, 0, CStrBuf(temp_file, MAX_PATH));
-  ASSERT1(result != 0 && result != ERROR_BUFFER_OVERFLOW);
-  if (result == 0 || result == ERROR_BUFFER_OVERFLOW) {
-    temp_file.Empty();
-  }
-
-  return temp_file;
-}
-
 DWORD WaitForAllObjects(size_t count, const HANDLE* handles, DWORD timeout) {
   if (count <= MAXIMUM_WAIT_OBJECTS) {
     return ::WaitForMultipleObjects(static_cast<DWORD>(count),
@@ -2223,11 +2052,6 @@ DWORD WaitForAllObjects(size_t count, const HANDLE* handles, DWORD timeout) {
   return abandoned ? WAIT_ABANDONED_0 : WAIT_OBJECT_0;
 }
 
-// The following code is cloned/derived from
-// https://cs.chromium.org/chromium/src/base/win/win_util.cc.
-enum DomainEnrollementState {UNKNOWN = -1, NOT_ENROLLED, ENROLLED};
-static volatile LONG g_domain_state = UNKNOWN;
-
 bool IsEnrolledToDomain() {
   DWORD is_enrolled(false);
   if (SUCCEEDED(RegKey::GetValue(MACHINE_REG_UPDATE_DEV,
@@ -2236,25 +2060,32 @@ bool IsEnrolledToDomain() {
     return !!is_enrolled;
   }
 
+  return EnrolledToDomainStatus() == ENROLLED;
+}
+
+// The following code is cloned/derived from
+// https://cs.chromium.org/chromium/src/base/win/win_util.cc.
+static volatile LONG g_domain_state = UNKNOWN;
+
+DomainEnrollmentState EnrolledToDomainStatus() {
   if (g_domain_state == UNKNOWN) {
     LPWSTR domain;
     NETSETUP_JOIN_STATUS join_status;
     if (::NetGetJoinInformation(NULL, &domain, &join_status) != NERR_Success) {
-      return false;
+      return UNKNOWN;
     }
 
     ::NetApiBufferFree(domain);
     ::InterlockedCompareExchange(&g_domain_state,
                                  join_status == ::NetSetupDomainName ?
-                                     ENROLLED : NOT_ENROLLED,
+                                     ENROLLED :
+                                     (join_status == ::NetSetupUnknownStatus ?
+                                      UNKNOWN_ENROLLED : NOT_ENROLLED),
                                  UNKNOWN);
   }
 
-  return g_domain_state == ENROLLED;
+  return static_cast<DomainEnrollmentState>(g_domain_state);
 }
-
-// TODO(omaha): This code needs to be used instead of IsEnrolledToDomain() once
-// Chrome enables IsDeviceRegisteredWithManagement.
 
 enum DeviceRegisteredState {NOT_KNOWN = -1, NOT_REGISTERED, REGISTERED};
 static volatile LONG g_registered_state = NOT_KNOWN;
@@ -2272,8 +2103,53 @@ bool IsDeviceRegisteredWithManagement() {
   return g_registered_state == REGISTERED;
 }
 
+enum AzureADState {AZUREAD_NOT_KNOWN = -1, AZUREAD_NOT_JOINED, AZUREAD_JOINED};
+static volatile LONG g_azure_ad_state = AZUREAD_NOT_KNOWN;
+
+bool IsJoinedToAzureAD() {
+  if (g_azure_ad_state == AZUREAD_NOT_KNOWN) {
+    PDSREG_JOIN_INFO join_info = NULL;
+
+    // |join_info| is non-NULL if the device is joined to Azure AD or the
+    // current user added Azure AD work accounts.
+    HRESULT hr(NetGetAadJoinInformationWrap(NULL, &join_info));
+    ::InterlockedCompareExchange(&g_azure_ad_state,
+                                 SUCCEEDED(hr) && join_info ?
+                                     AZUREAD_JOINED : AZUREAD_NOT_JOINED,
+                                 AZUREAD_NOT_KNOWN);
+    if (SUCCEEDED(hr)) {
+      NetFreeAadJoinInformationWrap(join_info);
+    }
+  }
+
+  return g_azure_ad_state == AZUREAD_JOINED;
+}
+
+static volatile LONG g_os_version_type = SUITE_LAST;
+
 bool IsEnterpriseManaged() {
-  return IsEnrolledToDomain() || IsDeviceRegisteredWithManagement();
+  if (g_os_version_type == SUITE_LAST) {
+    ::InterlockedCompareExchange(&g_os_version_type,
+                                 SystemInfo::GetOSVersionType(),
+                                 SUITE_LAST);
+  }
+
+  bool is_enterprise_version = (g_os_version_type != SUITE_HOME);
+
+  return IsEnrolledToDomain() ||
+         (is_enterprise_version &&
+          ((EnrolledToDomainStatus() == UNKNOWN_ENROLLED) ||
+           IsDeviceRegisteredWithManagement() ||
+           IsJoinedToAzureAD()));
+}
+
+HMODULE LoadSystemLibrary(const TCHAR* library_name) {
+  ASSERT1(!IsAbsolutePath(library_name));
+  const CString system_dir = app_util::GetSystemDir();
+  if (system_dir.IsEmpty()) {
+    return nullptr;
+  }
+  return LoadSystemLibraryHelper(ConcatenatePath(system_dir, library_name));
 }
 
 }  // namespace omaha

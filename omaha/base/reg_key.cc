@@ -17,6 +17,7 @@
 
 #include <raserror.h>
 #include <intsafe.h>
+#include <tuple>
 
 #include "omaha/base/logging.h"
 #include "omaha/base/static_assert.h"
@@ -28,6 +29,14 @@
 // The bulk of Omaha is designed to run as 32-bit only.  However, the crash
 // handler is compiled in a 64-bit form, and it needs to access the 32-bit
 // registry view. KEY_WOW64_32KEY is used by default for all registry access.
+
+namespace {
+
+// Declare `::NtDeleteKey` exported from ntdll.lib here, since no official
+// header has it.
+extern "C" NTSTATUS WINAPI NtDeleteKey(IN HANDLE KeyHandle);
+
+}  // namespace
 
 namespace omaha {
 
@@ -158,7 +167,8 @@ HRESULT RegKey::CreateKey(const TCHAR* full_key_name,
 
 HRESULT RegKey::Open(HKEY hKeyParent,
                      const TCHAR * key_name,
-                     REGSAM sam_desired) {
+                     REGSAM sam_desired,
+                     DWORD options) {
   ASSERT1(key_name);
   ASSERT1(hKeyParent != NULL);
   ASSERT1((sam_desired & (KEY_WOW64_64KEY | KEY_WOW64_32KEY)) !=
@@ -169,7 +179,7 @@ HRESULT RegKey::Open(HKEY hKeyParent,
     wow_override = k64BitView;
   else
     sam_desired |= KEY_WOW64_32KEY;
-  LONG res = ::RegOpenKeyEx(hKeyParent, key_name, 0,
+  LONG res = ::RegOpenKeyEx(hKeyParent, key_name, options,
                             sam_desired, &hKey);
   HRESULT hr = HRESULT_FROM_WIN32(res);
 
@@ -591,7 +601,7 @@ HRESULT RegKey::GetValue(const TCHAR * value_name, TCHAR * * value) const {
       if (byte_count != 0) {
         // make the call again
         res = ::SHQueryValueEx(h_key_, value_name, NULL, &type,
-                              reinterpret_cast<byte*>(*value), &byte_count);
+                               reinterpret_cast<byte*>(*value), &byte_count);
         hr = HRESULT_FROM_WIN32(res);
       } else {
         (*value)[0] = _T('\0');
@@ -633,7 +643,7 @@ HRESULT RegKey::GetValue(const TCHAR* value_name, OUT CString* value) const {
         hr = E_OUTOFMEMORY;
       } else {
         res = ::SHQueryValueEx(h_key_, value_name, NULL, &type,
-                              reinterpret_cast<byte*>(buffer), &byte_count);
+                               reinterpret_cast<byte*>(buffer), &byte_count);
         hr = HRESULT_FROM_WIN32(res);
       }
       value->ReleaseBuffer();
@@ -865,7 +875,7 @@ HRESULT RegKey::RenameValue(const TCHAR* old_value_name,
     return hr;
   }
 
-  VERIFY1(SUCCEEDED(DeleteValue(old_value_name)));
+  VERIFY_SUCCEEDED(DeleteValue(old_value_name));
   return S_OK;
 }
 
@@ -1017,9 +1027,38 @@ HRESULT RegKey::DeleteValue(const TCHAR * full_key_name,
   return hr;
 }
 
+std::tuple<bool, HRESULT> RegKey::DeleteLink(const TCHAR* key_name) {
+  ASSERT1(key_name);
+  ASSERT1(h_key_);
+
+  RegKey maybe_link;
+  HRESULT hr = maybe_link.Open(h_key_,
+                               key_name,
+                               KEY_QUERY_VALUE | DELETE,
+                               REG_OPTION_OPEN_LINK);
+  if (FAILED(hr)) {
+    return {false, hr};
+  }
+
+  DWORD value_type = 0;
+  hr = maybe_link.GetValueType(L"SymbolicLinkValue", &value_type);
+  if (FAILED(hr) || value_type != REG_LINK) {
+    return {false, hr};
+  }
+
+  // `::NtDeleteKey` can delete symbolic links opened with
+  // `REG_OPTION_OPEN_LINK`.
+  return {true, HRESULT_FROM_NT(NtDeleteKey(maybe_link.h_key_))};
+}
+
 HRESULT RegKey::RecurseDeleteSubKey(const TCHAR * key_name) {
   ASSERT1(key_name);
   ASSERT1(h_key_);
+
+  const std::tuple<bool, HRESULT> delete_result = DeleteLink(key_name);
+  if (std::get<0>(delete_result)) {
+    return std::get<1>(delete_result);
+  }
 
   RegKey key;
   HRESULT hr = key.Open(h_key_, key_name,
@@ -1342,7 +1381,7 @@ HRESULT RegKeyWatcher::EnsureEventSetup() {
 
     if (allow_creation_ && !RegKey::HasKey(reg_key_string_)) {
       RegKey key;
-      VERIFY1(SUCCEEDED(key.Create(reg_key_string_)));
+      VERIFY_SUCCEEDED(key.Create(reg_key_string_));
     }
 
     HRESULT hr = local_reg_key->Open(reg_key_string_, KEY_NOTIFY);

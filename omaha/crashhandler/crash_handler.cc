@@ -29,7 +29,6 @@
 #include "omaha/crashhandler/crash_handler.h"
 
 #include <atlbase.h>
-#include <atlsecurity.h>
 #include <atlstr.h>
 #include <map>
 
@@ -107,10 +106,10 @@ HRESULT CrashHandler::Main(bool is_system) {
                       COMMANDLINE_MODE_CRASH_HANDLER);
     custom_info_map[kCrashCustomInfoCommandLineMode] = command_line_mode;
 
-    VERIFY1(SUCCEEDED(
+    VERIFY_SUCCEEDED(
         OmahaExceptionHandler::Create(is_system,
                                       custom_info_map,
-                                      &exception_handler_)));
+                                      &exception_handler_));
 
     // Are we allowed to monitor crashes?
     if (!ConfigManager::Instance()->CanCollectStats(is_system)) {
@@ -323,29 +322,14 @@ HRESULT CrashHandler::StartServer() {
   }
   UTIL_LOG(L6, (_T("[listening on crash pipe][%s]"), pipe_name));
 
-  CSecurityDesc pipe_sec_desc;
-  hr = crash_utils::BuildPipeSecurityAttributes(is_system_, &pipe_sec_desc);
-  if (FAILED(hr)) {
-    CORE_LOG(LE, (_T("[BuildPipeSecurityAttributes() failed][0x%08x]"), hr));
-    return GOOPDATE_E_CRASH_SECURITY_FAILED;
-  }
-  CSecurityAttributes pipe_sec_attrs;
-  pipe_sec_attrs.Set(pipe_sec_desc);
-
-#ifdef DEBUG
-  // Print SDDL to log for debugging.
-  CString sddl;
-  pipe_sec_desc.ToString(&sddl, OWNER_SECURITY_INFORMATION |
-                                GROUP_SECURITY_INFORMATION |
-                                DACL_SECURITY_INFORMATION  |
-                                SACL_SECURITY_INFORMATION  |
-                                LABEL_SECURITY_INFORMATION);
-  CORE_LOG(L1, (_T("[Pipe security SDDL][%s]"), sddl));
-#endif
-
+  // https://bit.ly/3fygY37
+  // The ACLs in the default security descriptor for a named pipe grant full
+  // control to the LocalSystem account, administrators, and the creator owner.
+  // They also grant read access to members of the Everyone group and the
+  // anonymous account.
   crash_server_.reset(new google_breakpad::CrashGenerationServer(
       std::wstring(pipe_name),
-      &pipe_sec_attrs,
+      NULL,
       BreakpadClientConnected, NULL,
       BreakpadClientCrashed, this,
       BreakpadClientDisconnected, NULL,
@@ -638,7 +622,7 @@ HRESULT CrashHandler::RunUntilShutdown() {
   // Trim the process working set to minimum. It does not need a more complex
   // algorithm for now. Likely the working set will increase slightly over time
   // as the CrashHandler is handling events.
-  VERIFY1(SUCCEEDED(System::EmptyProcessWorkingSet()));
+  VERIFY_SUCCEEDED(System::EmptyProcessWorkingSet());
 
   // Pump messages.  If the shutdown event is set, a WM_QUIT will be posted to
   // this thread (from a thread pool thread running Shutdown(), below) to exit.

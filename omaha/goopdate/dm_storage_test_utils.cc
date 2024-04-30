@@ -84,4 +84,4 @@ void WriteLegacyDmToken(const char* dm_token) {
 
 #endif  // defined(HAS_LEGACY_DM_CLIENT)
 
-}  // namespace
+}  // namespace omaha

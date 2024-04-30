@@ -41,6 +41,7 @@
 #include "omaha/base/utils.h"
 #include "omaha/common/config_manager.h"
 #include "omaha/common/const_goopdate.h"
+#include "omaha/common/google_signaturevalidator.h"
 #include "omaha/goopdate/model.h"
 #include "omaha/goopdate/package_cache.h"
 #include "omaha/goopdate/server_resource.h"
@@ -94,15 +95,15 @@ HRESULT CreateNetworkRequest(NetworkRequest** network_request_ptr) {
 }
 
 // TODO(omaha): Unit test this method.
-HRESULT ValidateSize(const CString& file_path, uint64 expected_size) {
-  CORE_LOG(L3, (_T("[ValidateSize][%s][%lld]"), file_path, expected_size));
-  ASSERT1(File::Exists(file_path));
+HRESULT ValidateSize(File* source_file, uint64 expected_size) {
+  CORE_LOG(L3, (_T("[ValidateSize][%lld]"), expected_size));
+  ASSERT1(source_file);
   ASSERT1(expected_size != 0);
   ASSERT(expected_size <= UINT_MAX,
          (_T("TODO(omaha): Add uint64 support to GetFileSizeUnopen().")));
 
   uint32 file_size(0);
-  HRESULT hr = File::GetFileSizeUnopen(file_path, &file_size);
+  HRESULT hr = source_file->GetLength(&file_size);
   ASSERT1(SUCCEEDED(hr));
   if (FAILED(hr)) {
     return hr;
@@ -217,18 +218,19 @@ CString DownloadManager::GetMessageForError(const ErrorContext& error_context,
     case GOOPDATEDOWNLOAD_E_FILE_SIZE_ZERO:
     case GOOPDATEDOWNLOAD_E_FILE_SIZE_SMALLER:
     case GOOPDATEDOWNLOAD_E_FILE_SIZE_LARGER:
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_DOWNLOAD_HASH_MISMATCH,
-                                             &message)));
+    case GOOPDATEDOWNLOAD_E_AUTHENTICODE_VERIFICATION_FAILED:
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_DOWNLOAD_HASH_MISMATCH,
+                                             &message));
       break;
     case GOOPDATEDOWNLOAD_E_CACHING_FAILED:
-      VERIFY1(SUCCEEDED(formatter.FormatMessage(
-          &message, IDS_CACHING_ERROR, error_context.extra_code1, &message)));
+      VERIFY_SUCCEEDED(formatter.FormatMessage(
+          &message, IDS_CACHING_ERROR, error_context.extra_code1, &message));
       break;
     default:
       if (!worker_utils::FormatMessageForNetworkError(error_context.error_code,
                                                       language,
                                                       &message)) {
-        VERIFY1(SUCCEEDED(formatter.LoadString(IDS_DOWNLOAD_ERROR, &message)));
+        VERIFY_SUCCEEDED(formatter.LoadString(IDS_DOWNLOAD_ERROR, &message));
       }
       break;
   }
@@ -286,7 +288,7 @@ HRESULT DownloadManager::DownloadApp(App* app) {
     ++metric_worker_download_succeeded;
   }
 
-  VERIFY1(SUCCEEDED(DeleteStateForApp(app)));
+  VERIFY_SUCCEEDED(DeleteStateForApp(app));
 
   return hr;
 }
@@ -410,7 +412,7 @@ HRESULT DownloadManager::DoDownloadPackage(Package* package, State* state) {
       }
     }
 
-    VERIFY1(SUCCEEDED(network_request->Close()));
+    VERIFY_SUCCEEDED(network_request->Close());
     DeleteBeforeOrAfterReboot(unique_filename_path);
     app->SetCurrentTimeAs(App::TIME_DOWNLOAD_COMPLETE);
 
@@ -463,10 +465,23 @@ HRESULT DownloadManager::DoDownloadPackageFromUrl(const CString& url,
 
   // A file has been successfully downloaded from current url. Validate the file
   // and cache it.
-  hr = CallAsSelfAndImpersonate2(this,
+
+  // We open the downloaded file as the current (impersonated) user. This
+  // ensures that we are not reading any privileged files that are otherwise
+  // inaccessible to the impersonated user.
+  File source_file;
+  hr = source_file.OpenShareMode(filename, false, false, FILE_SHARE_READ);
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  // We copy the file to the Package Cache unimpersonated, since the package
+  // cache is in a privileged location.
+  hr = CallAsSelfAndImpersonate3(this,
                                  &DownloadManager::CachePackage,
                                  static_cast<const Package*>(package),
-                                 static_cast<const CString*>(&filename));
+                                 &source_file,
+                                 &filename);
   if (FAILED(hr)) {
     OPT_LOG(LE, (_T("[DownloadManager::CachePackage failed][%#x]"), hr));
   }
@@ -483,7 +498,7 @@ void DownloadManager::Cancel(App* app) {
 
   for (size_t i = 0; i != download_state_.size(); ++i) {
     if (app == download_state_[i]->app()) {
-      VERIFY1(SUCCEEDED(download_state_[i]->CancelNetworkRequest()));
+      VERIFY_SUCCEEDED(download_state_[i]->CancelNetworkRequest());
     }
   }
 }
@@ -494,7 +509,7 @@ void DownloadManager::CancelAll() {
   __mutexScope(lock());
 
   for (size_t i = 0; i != download_state_.size(); ++i) {
-    VERIFY1(SUCCEEDED(download_state_[i]->CancelNetworkRequest()));
+    VERIFY_SUCCEEDED(download_state_[i]->CancelNetworkRequest());
   }
 }
 
@@ -509,17 +524,29 @@ HRESULT DownloadManager::PurgeAppLowerVersions(const CString& app_id,
 }
 
 HRESULT DownloadManager::CachePackage(const Package* package,
-                                      const CString* filename_path) {
+                                      File* source_file,
+                                      const CString* source_file_path) {
   ASSERT1(package);
-  ASSERT1(filename_path);
+  ASSERT1(source_file);
 
   const CString app_id(package->app_version()->app()->app_guid_string());
   const CString version(package->app_version()->version());
   const CString package_name(package->filename());
   PackageCache::Key key(app_id, version, package_name);
 
-  HRESULT hr = package_cache()->Put(
-      key, *filename_path, package->expected_hash());
+  HRESULT hr = E_UNEXPECTED;
+
+  if (ConfigManager::Instance()->ShouldVerifyPayloadAuthenticodeSignature()) {
+    hr = EnsureSignatureIsValid(*source_file_path);
+    if (FAILED(hr)) {
+      CORE_LOG(LE, (_T("[EnsureSignatureIsValid failed][%s][0x%08x]"),
+                    package->filename(), hr));
+      return GOOPDATEDOWNLOAD_E_AUTHENTICODE_VERIFICATION_FAILED;
+    }
+  }
+
+  hr = package_cache()->Put(
+      key, source_file, package->expected_hash());
   if (hr != SIGS_E_INVALID_SIGNATURE) {
     if (FAILED(hr)) {
       set_error_extra_code1(static_cast<int>(hr));
@@ -532,12 +559,27 @@ HRESULT DownloadManager::CachePackage(const Package* package,
   // TODO(omaha): It would be nice to detect that we downloaded a proxy
   // page and tell the user this. It would be even better if we could
   // display it; that would require a lot more plumbing.
-  HRESULT size_hr = ValidateSize(*filename_path, package->expected_size());
+  HRESULT size_hr = ValidateSize(source_file, package->expected_size());
   if (FAILED(size_hr)) {
     hr = size_hr;
   }
 
   return hr;
+}
+
+HRESULT DownloadManager::EnsureSignatureIsValid(const CString& file_path) {
+  const TCHAR* ext = ::PathFindExtension(file_path);
+  ASSERT1(ext);
+  if (*ext != _T('\0')) {
+    ext++;  // Skip the dot.
+    for (size_t i = 0; i < arraysize(kAuthenticodeVerifiableExtensions); ++i) {
+      if (CString(kAuthenticodeVerifiableExtensions[i]).CompareNoCase(ext)
+          == 0) {
+        return VerifyGoogleAuthenticodeSignature(file_path, true);
+      }
+    }
+  }
+  return S_OK;
 }
 
 // The file is initially downloaded to a temporary unique name, to account
@@ -553,8 +595,12 @@ HRESULT DownloadManager::BuildUniqueFileName(const CString& filename,
     return hr;
   }
 
-  // Format of the unique file name is: <temp_download_dir>/<guid>-<filename>.
   const CString temp_dir(ConfigManager::Instance()->GetTempDownloadDir());
+  if (temp_dir.IsEmpty()) {
+    return E_UNEXPECTED;
+  }
+
+  // Format of the unique file name is: <temp_download_dir>/<guid>-<filename>.
   CString temp_filename;
   SafeCStringFormat(&temp_filename, _T("%s-%s"), GuidToString(guid), filename);
   *unique_filename = ConcatenatePath(temp_dir, temp_filename);

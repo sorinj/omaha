@@ -48,27 +48,6 @@ const int kProcessesCleanupWait = 30000;
 
 const TCHAR* const kFutureVersionString = _T("9.8.7.6");
 
-const TCHAR* const kAppMachineClientsPath =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
-    _T("\\Clients\\{50DA5C89-FF97-4536-BF3F-DF54C2F02EA8}\\");
-const TCHAR* const kAppMachineClientStatePath =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
-    _T("\\ClientState\\{50DA5C89-FF97-4536-BF3F-DF54C2F02EA8}\\");
-const TCHAR* const kApp2MachineClientsPath =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
-    _T("\\Clients\\{CB8E8A3C-7295-4529-B083-D5F76DCD4CC2}\\");
-
-const TCHAR* const kAppUserClientsPath =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
-    _T("\\Clients\\{50DA5C89-FF97-4536-BF3F-DF54C2F02EA8}\\");
-const TCHAR* const kAppUserClientStatePath =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
-    _T("\\ClientState\\{50DA5C89-FF97-4536-BF3F-DF54C2F02EA8}\\");
-const TCHAR* const kApp2UserClientsPath =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
-    _T("\\Clients\\{CB8E8A3C-7295-4529-B083-D5F76DCD4CC2}\\");
-
-
 class HoldLock : public Runnable {
  public:
   explicit HoldLock(bool is_machine)
@@ -154,7 +133,7 @@ class SetupTest : public testing::Test {
         not_listening_exe_opposite_path_(!is_machine ?
                                          not_listening_machine_exe_path_ :
                                          not_listening_user_exe_path_) {
-    omaha_exe_path_ = ConcatenatePath(omaha_path_, _T("GoogleUpdate.exe"));
+    omaha_exe_path_ = ConcatenatePath(omaha_path_, MAIN_EXE_BASE_NAME _T(".exe"));
   }
 
   virtual void SetUp() {
@@ -185,7 +164,8 @@ class SetupTest : public testing::Test {
     thread.Start(&hold_lock);
     hold_lock.WaitForLockToBeAcquired();
 
-    EXPECT_EQ(GOOPDATE_E_FAILED_TO_GET_LOCK, setup_->Install(false));
+    EXPECT_EQ(GOOPDATE_E_FAILED_TO_GET_LOCK,
+              setup_->Install(RUNTIME_MODE_NOT_SET));
 
     hold_lock.Stop();
     thread.WaitTillExit(1000);
@@ -562,7 +542,7 @@ class SetupTest : public testing::Test {
                                                  kProcessesCleanupWait));
   }
 
-  // Starts dummy process that doesn't exit and assigns it to the specified job.
+  // Starts test process that doesn't exit and assigns it to the specified job.
   // The handle returned by ShellExecute does not have PROCESS_SET_QUOTA access
   // rights, so we get a new handle with the correct access rights to return to
   // the caller.
@@ -619,42 +599,46 @@ class SetupTest : public testing::Test {
         _T("Last Error: ") << ::GetLastError() << std::endl;
   }
 
-  void TestShouldDelayUninstall() {
-    EXPECT_FALSE(setup_->ShouldDelayUninstall());
+  void TestGetRuntimeMode() {
+    EXPECT_EQ(RUNTIME_MODE_NOT_SET, setup_->GetRuntimeMode());
 
     const TCHAR* key = ConfigManager::Instance()->registry_update(is_machine_);
 
-    DWORD value = 1;
     EXPECT_SUCCEEDED(RegKey::SetValue(key,
-                                      kRegValueDelayOmahaUninstall,
-                                      value));
-    EXPECT_TRUE(setup_->ShouldDelayUninstall());
+                                      kRegValueRuntimeMode,
+                                      static_cast<DWORD>(RUNTIME_MODE_TRUE)));
+    EXPECT_EQ(RUNTIME_MODE_TRUE, setup_->GetRuntimeMode());
 
-    value = 0;
+    EXPECT_SUCCEEDED(RegKey::SetValue(
+        key, kRegValueRuntimeMode, static_cast<DWORD>(RUNTIME_MODE_PERSIST)));
+    EXPECT_EQ(RUNTIME_MODE_PERSIST, setup_->GetRuntimeMode());
+
     EXPECT_SUCCEEDED(RegKey::SetValue(key,
-                                      kRegValueDelayOmahaUninstall,
-                                      value));
-    EXPECT_FALSE(setup_->ShouldDelayUninstall());
+                                      kRegValueRuntimeMode,
+                                      static_cast<DWORD>(RUNTIME_MODE_FALSE)));
+    EXPECT_EQ(RUNTIME_MODE_NOT_SET, setup_->GetRuntimeMode());
 
-    EXPECT_SUCCEEDED(RegKey::DeleteValue(key,
-                                         kRegValueDelayOmahaUninstall));
-    EXPECT_FALSE(setup_->ShouldDelayUninstall());
+    EXPECT_SUCCEEDED(RegKey::SetValue(key, kRegValueRuntimeMode, 999UL));
+    EXPECT_EQ(RUNTIME_MODE_NOT_SET, setup_->GetRuntimeMode());
+
+    EXPECT_SUCCEEDED(RegKey::DeleteValue(key, kRegValueRuntimeMode));
+    EXPECT_EQ(RUNTIME_MODE_NOT_SET, setup_->GetRuntimeMode());
   }
 
-  void TestSetDelayUninstall() {
-    EXPECT_FALSE(setup_->ShouldDelayUninstall());
+  void TestSetRuntimeMode() {
+    EXPECT_EQ(RUNTIME_MODE_NOT_SET, setup_->GetRuntimeMode());
 
-    EXPECT_SUCCEEDED(setup_->SetDelayUninstall(true));
-    EXPECT_TRUE(setup_->ShouldDelayUninstall());
+    EXPECT_SUCCEEDED(setup_->SetRuntimeMode(RUNTIME_MODE_TRUE));
+    EXPECT_EQ(RUNTIME_MODE_TRUE, setup_->GetRuntimeMode());
 
-    EXPECT_SUCCEEDED(setup_->SetDelayUninstall(true));
-    EXPECT_TRUE(setup_->ShouldDelayUninstall());
+    EXPECT_SUCCEEDED(setup_->SetRuntimeMode(RUNTIME_MODE_PERSIST));
+    EXPECT_EQ(RUNTIME_MODE_PERSIST, setup_->GetRuntimeMode());
 
-    EXPECT_SUCCEEDED(setup_->SetDelayUninstall(false));
-    EXPECT_FALSE(setup_->ShouldDelayUninstall());
+    EXPECT_SUCCEEDED(setup_->SetRuntimeMode(RUNTIME_MODE_NOT_SET));
+    EXPECT_EQ(RUNTIME_MODE_PERSIST, setup_->GetRuntimeMode());
 
-    EXPECT_SUCCEEDED(setup_->SetDelayUninstall(false));
-    EXPECT_FALSE(setup_->ShouldDelayUninstall());
+    EXPECT_SUCCEEDED(setup_->SetRuntimeMode(RUNTIME_MODE_FALSE));
+    EXPECT_EQ(RUNTIME_MODE_NOT_SET, setup_->GetRuntimeMode());
   }
 
   const bool is_machine_;
@@ -815,7 +799,7 @@ TEST_F(SetupFutureVersionInstalledUserTest, DISABLED_Install_NoRunKey) {
   ASSERT_FALSE(File::Exists(dll_path));
 
   EXPECT_EQ(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND),
-            setup_->Install(false));
+            setup_->Install(RUNTIME_MODE_NOT_SET));
   EXPECT_EQ(0, setup_->extra_code1());
 
   RestoreRegistryHives();
@@ -843,7 +827,7 @@ TEST_F(SetupFutureVersionInstalledUserTest, Install_ValidRunKey) {
   ASSERT_SUCCEEDED(File::Remove(dll_path));
   ASSERT_FALSE(File::Exists(dll_path));
 
-  EXPECT_SUCCEEDED(setup_->Install(false));
+  EXPECT_SUCCEEDED(setup_->Install(RUNTIME_MODE_NOT_SET));
   EXPECT_EQ(0, setup_->extra_code1());
 
   RestoreRegistryHives();
@@ -1043,7 +1027,7 @@ TEST_F(SetupRegistryProtectedUserTest,
 
   CopyGoopdateFiles(omaha_path_, this_version_);
   CString path = ConcatenatePath(ConcatenatePath(omaha_path_, this_version_),
-                                 UPDATE_PLUGIN_FILENAME);
+                                 kPSFileNameMachine64);
   ASSERT_SUCCEEDED(File::Remove(path));
   ASSERT_FALSE(File::Exists(path));
 
@@ -1068,23 +1052,23 @@ TEST_F(SetupRegistryProtectedUserTest, ShouldInstall_SameVersionShellMissing) {
 }
 
 //
-// ShouldDelayUninstall/SetDelayUninstall tests.
+// GetRuntimeMode/SetRuntimeMode tests.
 //
 
-TEST_F(SetupRegistryProtectedUserTest, ShouldDelayUninstall) {
-  TestShouldDelayUninstall();
+TEST_F(SetupRegistryProtectedUserTest, GetRuntimeMode) {
+  TestGetRuntimeMode();
 }
 
-TEST_F(SetupRegistryProtectedUserTest, SetDelayUninstall) {
-  TestSetDelayUninstall();
+TEST_F(SetupRegistryProtectedUserTest, SetRuntimeMode) {
+  TestSetRuntimeMode();
 }
 
-TEST_F(SetupRegistryProtectedMachineTest, ShouldDelayUninstall) {
-  TestShouldDelayUninstall();
+TEST_F(SetupRegistryProtectedMachineTest, GetRuntimeMode) {
+  TestGetRuntimeMode();
 }
 
-TEST_F(SetupRegistryProtectedMachineTest, SetDelayUninstall) {
-  TestSetDelayUninstall();
+TEST_F(SetupRegistryProtectedMachineTest, SetRuntimeMode) {
+  TestSetRuntimeMode();
 }
 
 //

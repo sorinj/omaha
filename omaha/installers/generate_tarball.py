@@ -19,9 +19,18 @@ import getopt
 import os.path
 import sys
 import tarfile
-import urllib
+# NOTE: Normally this would use something like six.moves.urllib to handle the
+# py2/py3 differences, but that's not available in the scons-based Omaha build
+# environment (and it's probably not worth figuring out how to add it, so this
+# is legacy Omaha stuff which is being replaced), so just hack in compatibility.
+try:
+  # py3
+  from urllib.parse import unquote as url_unquote
+except ImportError:
+  # py2
+  from urllib import unquote as url_unquote
 
-TEST_PREFIX = 'TEST_'
+TEST_PREFIXES = ('TEST_', 'TEST2_')
 
 def GenerateTarball(output_filename, members):
   """
@@ -32,9 +41,9 @@ def GenerateTarball(output_filename, members):
   for filename in members:
     # A hacky convention to get around the spaces in filenames is to
     # urlencode them. So at this point we unescape those characters.
-    scrubbed_filename = urllib.unquote(os.path.basename(filename))
-    if scrubbed_filename.startswith(TEST_PREFIX):
-      scrubbed_filename = scrubbed_filename[len(TEST_PREFIX):]
+    scrubbed_filename = url_unquote(os.path.basename(filename))
+    if scrubbed_filename.startswith(TEST_PREFIXES):
+      scrubbed_filename = scrubbed_filename.split('_', 1)[1]
     tarball.add(filename, scrubbed_filename)
   tarball.close()
 

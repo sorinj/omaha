@@ -24,24 +24,24 @@ namespace omaha {
 namespace {
 
 const TCHAR* const kAppMachineClientStatePath =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
+    _T("HKLM\\Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME
     _T("\\ClientState\\{19BE47E4-CF32-48c1-94C4-046507F6A8A6}\\");
 const TCHAR* const kApp2MachineClientStatePath =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
+    _T("HKLM\\Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME
     _T("\\ClientState\\{553B2D8C-E6A7-43ed-ACC9-A8BA5D34395F}\\");
 const TCHAR* const kAppUserClientStatePath =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
+    _T("HKCU\\Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME
     _T("\\ClientState\\{19BE47E4-CF32-48c1-94C4-046507F6A8A6}\\");
 const TCHAR* const kApp2UserClientStatePath =
-    _T("HKCU\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
+    _T("HKCU\\Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME
     _T("\\ClientState\\{553B2D8C-E6A7-43ed-ACC9-A8BA5D34395F}\\");
 
 const TCHAR* const kAppMachineClientStateMediumPath =
-    _T("HKLM\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
+    _T("HKLM\\Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME
     _T("\\ClientStateMedium\\{19BE47E4-CF32-48c1-94C4-046507F6A8A6}\\");
 
 // Update this when new modes are added.
-const int kLastMode = COMMANDLINE_MODE_REGISTER_MSI_HELPER;
+const int kLastMode = COMMANDLINE_MODE_HEALTH_CHECK;
 
 }  // namespace
 
@@ -630,7 +630,7 @@ TEST_F(GoopdateRegistryProtectedTest,
 TEST_F(GoopdateRegistryProtectedTest,
        PromoteAppEulaAccepted_User_UpdateZero_MediumAppValueOneAndStateKey) {
   const TCHAR* const kAppUserClientStateMediumPath =
-      _T("HKCU\\Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME
+      _T("HKCU\\Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME
       _T("\\ClientStateMedium\\{19BE47E4-CF32-48c1-94C4-046507F6A8A6}\\");
 
   EXPECT_SUCCEEDED(RegKey::CreateKey(kAppUserClientStatePath));
@@ -720,7 +720,6 @@ static void EnsureUnitTestUpdatedWithNewModes() {
     case COMMANDLINE_MODE_SERVICE:
     case COMMANDLINE_MODE_REGSERVER:
     case COMMANDLINE_MODE_UNREGSERVER:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     case COMMANDLINE_MODE_REPORTCRASH:
     case COMMANDLINE_MODE_INSTALL:
@@ -728,7 +727,6 @@ static void EnsureUnitTestUpdatedWithNewModes() {
     case COMMANDLINE_MODE_HANDOFF_INSTALL:
     case COMMANDLINE_MODE_UA:
     case COMMANDLINE_MODE_RECOVER:
-    case COMMANDLINE_MODE_WEBPLUGIN:
     case COMMANDLINE_MODE_CODE_RED_CHECK:
     case COMMANDLINE_MODE_COMSERVER:
     case COMMANDLINE_MODE_REGISTER_PRODUCT:
@@ -742,7 +740,6 @@ static void EnsureUnitTestUpdatedWithNewModes() {
     case COMMANDLINE_MODE_UNINSTALL:
     case COMMANDLINE_MODE_PING:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
     //
     // When adding a new mode, be sure to update kLastMode too.
     //
@@ -761,7 +758,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_MachineDirOnly) {
   }
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_REGSERVER));
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_UNREGSERVER));
-  EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_NETDIAGS));
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_CRASH));
   // TODO(omaha): Change to machine.
   EXPECT_FALSE(FromMachineDirHelper(COMMANDLINE_MODE_REPORTCRASH));
@@ -776,7 +772,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_MachineDirOnly) {
   }
   EXPECT_FALSE(FromMachineDirHelper(COMMANDLINE_MODE_UA));
   EXPECT_FALSE(FromMachineDirHelper(COMMANDLINE_MODE_RECOVER));
-  EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_WEBPLUGIN));
   EXPECT_FALSE(FromMachineDirHelper(COMMANDLINE_MODE_CODE_RED_CHECK));
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_COMSERVER));
   {
@@ -799,7 +794,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_MachineDirOnly) {
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_UNINSTALL));
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_PING));
   EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_HEALTH_CHECK));
-  EXPECT_TRUE(FromMachineDirHelper(COMMANDLINE_MODE_REGISTER_MSI_HELPER));
   EXPECT_TRUE(FromMachineDirHelper(
       static_cast<CommandLineMode>(kLastMode + 1)));
 }
@@ -811,7 +805,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_IsLocalSystemOnly) {
   EXPECT_TRUE(IsLocalSystemHelper(COMMANDLINE_MODE_SERVICE));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_REGSERVER));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_UNREGSERVER));
-  EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_NETDIAGS));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_CRASH));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_REPORTCRASH));
   {
@@ -825,7 +818,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_IsLocalSystemOnly) {
   }
   EXPECT_TRUE(IsLocalSystemHelper(COMMANDLINE_MODE_UA));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_RECOVER));
-  EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_WEBPLUGIN));
   EXPECT_TRUE(IsLocalSystemHelper(COMMANDLINE_MODE_CODE_RED_CHECK));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_COMSERVER));
   {
@@ -845,7 +837,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_IsLocalSystemOnly) {
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_UNINSTALL));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_PING));
   EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_HEALTH_CHECK));
-  EXPECT_FALSE(IsLocalSystemHelper(COMMANDLINE_MODE_REGISTER_MSI_HELPER));
   EXPECT_FALSE(IsLocalSystemHelper(
       static_cast<CommandLineMode>(kLastMode + 1)));
 }
@@ -860,7 +851,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_MachineOverrideOnly) {
   }
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_REGSERVER));
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_UNREGSERVER));
-  EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_NETDIAGS));
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_CRASH));
   EXPECT_TRUE(MachineOverrideHelper(COMMANDLINE_MODE_REPORTCRASH));
   {
@@ -874,7 +864,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_MachineOverrideOnly) {
   }
   EXPECT_TRUE(MachineOverrideHelper(COMMANDLINE_MODE_UA));
   EXPECT_TRUE(MachineOverrideHelper(COMMANDLINE_MODE_RECOVER));
-  EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_WEBPLUGIN));
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_CODE_RED_CHECK));
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_COMSERVER));
   {
@@ -897,7 +886,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_MachineOverrideOnly) {
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_UNINSTALL));
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_PING));
   EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_HEALTH_CHECK));
-  EXPECT_FALSE(MachineOverrideHelper(COMMANDLINE_MODE_REGISTER_MSI_HELPER));
   EXPECT_FALSE(MachineOverrideHelper(
       static_cast<CommandLineMode>(kLastMode + 1)));
 }
@@ -912,7 +900,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_NeedsAdminFalseOnly) {
   }
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_REGSERVER));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_UNREGSERVER));
-  EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_NETDIAGS));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_CRASH));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_REPORTCRASH));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_INSTALL));
@@ -920,7 +907,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_NeedsAdminFalseOnly) {
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_HANDOFF_INSTALL));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_UA));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_RECOVER));
-  EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_WEBPLUGIN));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_CODE_RED_CHECK));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_COMSERVER));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_REGISTER_PRODUCT));
@@ -937,7 +923,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_NeedsAdminFalseOnly) {
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_UNINSTALL));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_PING));
   EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_HEALTH_CHECK));
-  EXPECT_FALSE(NeedsAdminFalseHelper(COMMANDLINE_MODE_REGISTER_MSI_HELPER));
   EXPECT_FALSE(NeedsAdminFalseHelper(
       static_cast<CommandLineMode>(kLastMode + 1)));
 }
@@ -952,7 +937,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_NeedsAdminTrueOnly) {
   }
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_REGSERVER));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_UNREGSERVER));
-  EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_NETDIAGS));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_CRASH));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_REPORTCRASH));
   EXPECT_TRUE(NeedsAdminTrueHelper(COMMANDLINE_MODE_INSTALL));
@@ -960,7 +944,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_NeedsAdminTrueOnly) {
   EXPECT_TRUE(NeedsAdminTrueHelper(COMMANDLINE_MODE_HANDOFF_INSTALL));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_UA));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_RECOVER));
-  EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_WEBPLUGIN));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_CODE_RED_CHECK));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_COMSERVER));
   EXPECT_TRUE(NeedsAdminTrueHelper(COMMANDLINE_MODE_REGISTER_PRODUCT));
@@ -977,7 +960,6 @@ TEST_F(GoopdateIsMachineProcessTest, IsMachineProcess_NeedsAdminTrueOnly) {
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_UNINSTALL));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_PING));
   EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_HEALTH_CHECK));
-  EXPECT_FALSE(NeedsAdminTrueHelper(COMMANDLINE_MODE_REGISTER_MSI_HELPER));
   EXPECT_FALSE(NeedsAdminTrueHelper(
       static_cast<CommandLineMode>(kLastMode + 1)));
 }

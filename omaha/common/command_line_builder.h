@@ -42,6 +42,9 @@ class CommandLineBuilder {
   bool is_silent_set() const { return is_silent_set_; }
   void set_is_silent_set(bool is_silent_set);
 
+  bool is_always_launch_cmd_set() const { return is_always_launch_cmd_set_; }
+  void set_is_always_launch_cmd_set(bool is_always_launch_cmd_set);
+
   bool is_eula_required_set() const { return is_eula_required_set_; }
   void set_is_eula_required_set(bool is_eula_required_set);
 
@@ -65,12 +68,6 @@ class CommandLineBuilder {
 
   CString custom_info_filename() const { return custom_info_filename_; }
   void set_custom_info_filename(const CString& custom_info_filename);
-
-  CString webplugin_url_domain() const { return webplugin_url_domain_; }
-  void set_webplugin_url_domain(const CString& webplugin_url_domain);
-
-  CString webplugin_args() const { return webplugin_args_; }
-  void set_webplugin_args(const CString& webplugin_args);
 
   CString code_red_metainstaller_path() const {
     return code_red_metainstaller_path_;
@@ -107,7 +104,6 @@ class CommandLineBuilder {
   CString GetServiceUnregister() const;
   CString GetRegServer() const;
   CString GetUnregServer() const;
-  CString GetNetDiags() const;
   CString GetCrash() const;
   CString GetReportCrash() const;
   CString GetInstall() const;
@@ -115,7 +111,6 @@ class CommandLineBuilder {
   CString GetHandoffInstall() const;
   CString GetUA() const;
   CString GetRecover() const;
-  CString GetWebPlugin() const;
   CString GetCodeRedCheck() const;
   CString GetComServer() const;
   CString GetComBroker() const;
@@ -132,6 +127,7 @@ class CommandLineBuilder {
   bool is_interactive_set_;
   bool is_machine_set_;
   bool is_silent_set_;
+  bool is_always_launch_cmd_set_;
   bool is_eula_required_set_;
   bool is_enterprise_set_;
   CString extra_args_;
@@ -139,8 +135,6 @@ class CommandLineBuilder {
   CString install_source_;
   CString crash_filename_;
   CString custom_info_filename_;
-  CString webplugin_url_domain_;
-  CString webplugin_args_;
   CString code_red_metainstaller_path_;
   CString ping_string_;
   CString offline_dir_name_;

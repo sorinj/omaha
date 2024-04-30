@@ -49,6 +49,13 @@
 
 namespace omaha {
 
+namespace {
+
+// How many times should we retry when we get ERROR_WINHTTP_RESEND_REQUEST.
+constexpr const int kMaxResendAttempts = 3;
+
+}  // namespace
+
 SimpleRequest::TransientRequestState::TransientRequestState()
     : port(0),
       is_https(false),
@@ -73,7 +80,8 @@ SimpleRequest::SimpleRequest()
       proxy_auth_config_(NULL, CString()),
       low_priority_(false),
       callback_(NULL),
-      download_completed_(false) {
+      download_completed_(false),
+      resend_count_(0) {
   SafeCStringFormat(&user_agent_, _T("%s;winhttp"),
                     NetworkConfig::GetUserAgent());
 
@@ -338,9 +346,9 @@ HRESULT SimpleRequest::Connect() {
 
   // Disable redirects for POST requests.
   if (IsPostRequest()) {
-    VERIFY1(SUCCEEDED(
+    VERIFY_SUCCEEDED(
         winhttp_adapter_->SetRequestOptionInt(WINHTTP_OPTION_DISABLE_FEATURE,
-                                              WINHTTP_DISABLE_REDIRECTS)));
+                                              WINHTTP_DISABLE_REDIRECTS));
   }
 
   CString additional_headers = additional_headers_;
@@ -454,9 +462,9 @@ HRESULT SimpleRequest::SendRequest() {
                                 kHeaderXProxyManualAuth);
       }
       uint32 flags = WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE;
-      VERIFY1(SUCCEEDED(winhttp_adapter_->AddRequestHeaders(headers,
+      VERIFY_SUCCEEDED(winhttp_adapter_->AddRequestHeaders(headers,
                                                             -1,
-                                                            flags)));
+                                                            flags));
     }
 
     const DWORD bytes_to_send = static_cast<DWORD>(request_buffer_length_);
@@ -477,13 +485,20 @@ HRESULT SimpleRequest::SendRequest() {
 #if DEBUG
     LogResponseHeaders();
 #endif
-    if (hr == ERROR_WINHTTP_RESEND_REQUEST) {
+    if (hr == HRESULT_FROM_WIN32(ERROR_WINHTTP_RESEND_REQUEST)) {
       // Resend the request if needed, likely because the authentication
       // scheme requires many transactions on the same handle.
+
+      // Avoid infinite resend loop.
+      if (++resend_count_ >= kMaxResendAttempts)
+        return hr;
+
       continue;
     } else if (FAILED(hr)) {
       return hr;
     }
+
+    resend_count_ = 0;
 
     hr = winhttp_adapter_->QueryRequestHeadersInt(
         WINHTTP_QUERY_STATUS_CODE,
@@ -572,9 +587,9 @@ HRESULT SimpleRequest::SendRequest() {
           NetworkConfig* network_config = NULL;
           hr = network_manager.GetUserNetworkConfig(&network_config);
           if (SUCCEEDED(hr)) {
-            VERIFY1(SUCCEEDED(network_config->SetProxyAuthScheme(
+            VERIFY_SUCCEEDED(network_config->SetProxyAuthScheme(
                 request_state_->proxy, request_state_->is_https,
-                request_scheme)));
+                request_scheme));
           }
         }
         done = true;
@@ -700,6 +715,21 @@ HRESULT SimpleRequest::PrepareRequest(HANDLE* file_handle) {
 HRESULT SimpleRequest::RequestData(HANDLE file_handle) {
   HRESULT hr = SendRequest();
   if (FAILED(hr)) {
+    // WININET_E_DECODING_FAILED is equivalent to
+    // HRESULT_FROM_WIN32(ERROR_WINHTTP_SECURE_FAILURE) as well as
+    // HRESULT_FROM_WIN32(ERROR_INTERNET_DECODING_FAILED). Distinguish the two.
+    if (hr == WININET_E_DECODING_FAILED) {
+      HRESULT secure_status_hr =
+          winhttp_adapter_->GetErrorFromSecureStatusFlag();
+
+      if (FAILED(secure_status_hr)) {
+        OPT_LOG(LE, (L"[SimpleRequest::RequestData]"
+                     L"[Changing hresult from: 0x%8x to: 0x%8x]",
+                     hr, secure_status_hr));
+        hr = secure_status_hr;
+      }
+    }
+
     return hr;
   }
 

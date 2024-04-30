@@ -69,9 +69,9 @@ UpdateRequest* UpdateRequest::Create(bool is_machine,
     request.check_period_sec = check_period_sec;
   }
 
-  request.dlpref = cm->GetDownloadPreferenceGroupPolicy();
+  request.dlpref = cm->GetDownloadPreferenceGroupPolicy(NULL);
 
-  request.domain_joined = IsEnrolledToDomain();
+  request.domain_joined = IsEnterpriseManaged();
 
   // Hardware platform attributes.
   //
@@ -104,10 +104,9 @@ UpdateRequest* UpdateRequest::Create(bool is_machine,
 
   // Software platform attributes.
   request.os.platform = kPlatformWin;
-  VERIFY1(SUCCEEDED(goopdate_utils::GetOSInfo(&request.os.version,
-                                              &request.os.service_pack)));
-  request.os.arch = xml::ConvertProcessorArchitectureToString(
-      SystemInfo::GetProcessorArchitecture());
+  VERIFY_SUCCEEDED(goopdate_utils::GetOSInfo(&request.os.version,
+                                              &request.os.service_pack));
+  request.os.arch = SystemInfo::GetArchitecture();
 
   return update_request.release();
 }
@@ -117,7 +116,7 @@ UpdateRequest* UpdateRequest::Create(bool is_machine,
                                      const CString& install_source,
                                      const CString& origin_url) {
   CString request_id;
-  VERIFY1(SUCCEEDED(GetGuid(&request_id)));
+  VERIFY_SUCCEEDED(GetGuid(&request_id));
   return Create(is_machine, session_id, install_source, origin_url, request_id);
 }
 

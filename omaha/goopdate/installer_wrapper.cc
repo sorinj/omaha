@@ -13,7 +13,10 @@
 // limitations under the License.
 // ========================================================================
 
+#include <atlpath.h>
+
 #include <vector>
+
 #include "goopdate/omaha3_idl.h"
 #include "omaha/goopdate/installer_wrapper.h"
 #include "omaha/base/const_object_names.h"
@@ -110,14 +113,14 @@ void GetSystemErrorString(uint32 error_code,
 
   const CString error_message(GetMessageForSystemErrorCode(error_code));
   if (!error_message.IsEmpty()) {
-    VERIFY1(SUCCEEDED(formatter.FormatMessage(error_string,
+    VERIFY_SUCCEEDED(formatter.FormatMessage(error_string,
                                               IDS_INSTALLER_FAILED_WITH_MESSAGE,
                                               error_code_string,
-                                              error_message)));
+                                              error_message));
   } else {
-    VERIFY1(SUCCEEDED(formatter.FormatMessage(error_string,
+    VERIFY_SUCCEEDED(formatter.FormatMessage(error_string,
                                               IDS_INSTALLER_FAILED_NO_MESSAGE,
-                                              error_code_string)));
+                                              error_code_string));
   }
 
   OPT_LOG(LEVEL_ERROR, (_T("[installer system error][%u][%s]"),
@@ -204,40 +207,40 @@ CString InstallerWrapper::GetMessageForError(HRESULT error_code,
 
   switch (error_code) {
     case GOOPDATEINSTALL_E_FILENAME_INVALID:
-      VERIFY1(SUCCEEDED(formatter.FormatMessage(&message,
+      VERIFY_SUCCEEDED(formatter.FormatMessage(&message,
                                                 IDS_INVALID_INSTALLER_FILENAME,
-                                                installer_filename)));
+                                                installer_filename));
       break;
     case GOOPDATEINSTALL_E_INSTALLER_FAILED_START:
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALLER_FAILED_TO_START,
-                                             &message)));
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALLER_FAILED_TO_START,
+                                             &message));
       break;
     case GOOPDATEINSTALL_E_INSTALLER_TIMED_OUT:
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALLER_TIMED_OUT,
-                                             &message)));
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALLER_TIMED_OUT,
+                                             &message));
       break;
     case GOOPDATEINSTALL_E_INSTALLER_DID_NOT_WRITE_CLIENTS_KEY:
     case GOOPDATEINSTALL_E_INSTALLER_DID_NOT_CHANGE_VERSION:
     case GOOPDATEINSTALL_E_INSTALLER_VERSION_MISMATCH:
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message)));
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message));
       break;
     case GOOPDATEINSTALL_E_MSI_INSTALL_ALREADY_RUNNING:
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_MSI_INSTALL_ALREADY_RUNNING,
-                                             &message)));
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_MSI_INSTALL_ALREADY_RUNNING,
+                                             &message));
       break;
     case GOOPDATEINSTALL_E_INSTALLER_FAILED:
       ASSERT(false,
              (_T("[GetOmahaErrorTextToReport]")
               _T("GOOPDATEINSTALL_E_INSTALLER_FAILED should never be reported ")
               _T("directly. The installer error string should be reported.")));
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message)));
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message));
       break;
     case GOOPDATEINSTALL_E_INSTALLER_INTERNAL_ERROR:
     default:
       ASSERT(false, (_T("[GetOmahaErrorTextToReport]")
                      _T("[An Omaha error occurred that this method does not ")
                      _T("know how to report.][0x%08x]"), error_code));
-      VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message)));
+      VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message));
       break;
   }
 
@@ -272,9 +275,17 @@ HRESULT InstallerWrapper::BuildCommandLineFromFilename(
   // created, so Omaha does not delete it.
   CString enclosed_installer_data_file_path;
 
-  VERIFY1(SUCCEEDED(goopdate_utils::WriteInstallerDataToTempFile(
+  // We use the App Installer's directory for the InstallerData file.
+  CPath app_installer_directory(file_path);
+  if (!app_installer_directory.RemoveFileSpec()) {
+    OPT_LOG(LE, (_T("[Does not appear to be a filename '%s']"), file_path));
+    return GOOPDATEINSTALL_E_FILENAME_INVALID;
+  }
+
+  VERIFY_SUCCEEDED(goopdate_utils::WriteInstallerDataToTempFile(
+      app_installer_directory,
       installer_data,
-      &enclosed_installer_data_file_path)));
+      &enclosed_installer_data_file_path));
   if (!enclosed_installer_data_file_path.IsEmpty()) {
     EnclosePath(&enclosed_installer_data_file_path);
   }

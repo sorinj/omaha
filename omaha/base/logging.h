@@ -58,7 +58,7 @@ namespace omaha {
 
 #ifdef _DEBUG
 #define kDefaultMaxLogFileSize          0xFFFFFFFF  // 4GB
-#define kDefaultLogToFile               1
+#define kDefaultLogToFile               0
 #define kDefaultLogToOutputDebug        1
 #define kDefaultLogLevel                L3
 #else
@@ -80,7 +80,6 @@ namespace omaha {
 #define kConfigAttrEnableLogging        L"EnableLogging"
 #define kConfigAttrShowTime             L"ShowTime"
 #define kConfigAttrLogToFile            L"LogToFile"
-#define kConfigAttrLogFilePath          L"LogFilePath"
 #define kConfigAttrLogFileWide          L"LogFileWide"
 #define kConfigAttrLogToOutputDebug     L"LogToOutputDebug"
 #define kConfigAttrAppendToFile         L"AppendToFile"
@@ -129,7 +128,6 @@ namespace omaha {
 // Shortcuts for different logging categories - no need to specify the category.
 #define CORE_LOG(x, y)         LC_LOG_DEBUG(omaha::LC_CORE, x, y)
 #define NET_LOG(x, y)          LC_LOG_DEBUG(omaha::LC_NET, x, y)
-#define PLUGIN_LOG(x, y)       LC_LOG_DEBUG(omaha::LC_PLUGIN, x, y)
 #define SERVICE_LOG(x, y)      LC_LOG_DEBUG(omaha::LC_SERVICE, x, y)
 #define SETUP_LOG(x, y)        LC_LOG_DEBUG(omaha::LC_SETUP, x, y)
 #define SHELL_LOG(x, y)        LC_LOG_DEBUG(omaha::LC_SHELL, x, y)
@@ -154,7 +152,6 @@ enum LogCategory {
   LC_SHELL,
   LC_CORE,
   LC_JS,
-  LC_PLUGIN,
   LC_SERVICE,
   LC_OPT,
   LC_NET,
@@ -216,6 +213,7 @@ class LogWriter {
  protected:
   LogWriter();
   virtual void Cleanup();
+
  public:
   virtual ~LogWriter();
 
@@ -370,6 +368,7 @@ class Logging {
   const CString& proc_name() const { return proc_name_; }
 
   bool IsCategoryEnabledForBuffering(LogCategory cat);
+
  private:
   bool InternalInitialize();
   void InternalLogMessageMaskedVA(DWORD writer_mask,
@@ -412,7 +411,6 @@ class Logging {
   CString GetAltConfigurationFilePath() const;
 
  public:
-
   // Passes the messages along to other OutputMessage()
   void OutputMessage(DWORD writer_mask, LogCategory cat, LogLevel level,
                      const wchar_t* msg1, const wchar_t* msg2);
@@ -424,7 +422,6 @@ class Logging {
   void OutputMessage(DWORD writer_mask, const OutputInfo* output_info);
 
  private:
-
   CategoryInfo category_list_[LC_MAX_CAT];
 
   // Checks if logging is initialized.
@@ -444,7 +441,6 @@ class Logging {
   bool force_show_time_;
   bool show_time_;
   bool log_to_file_;
-  CString log_file_name_;
   bool log_to_debug_out_;
   bool append_to_file_;
 

@@ -16,6 +16,8 @@
 #include "omaha/base/utils.h"
 #include "omaha/base/user_info.h"
 #include "omaha/base/vistautil.h"
+#include "omaha/common/config_manager.h"
+#include "omaha/common/const_group_policy.h"
 #include "testing/unit_test.h"
 
 namespace omaha {
@@ -92,6 +94,22 @@ TEST(UnitTestHelpersTest, StringToGuid_ValidString) {
 
   EXPECT_GUID_EQ(kExpectedGuid,
                  StringToGuid(_T("{ca3045bf-a6b1-4fb8-a0ef-a615cefe452c}")));
+}
+
+TEST(UnitTestHelpersTest, ClearGroupPolicies) {
+  EXPECT_SUCCEEDED(RegKey::SetValue(MACHINE_REG_UPDATE_DEV,
+                                    kRegValueIsEnrolledToDomain,
+                                    1UL));
+  EXPECT_SUCCEEDED(SetPolicyString(kRegValueDownloadPreference,
+                                   kDownloadPreferenceCacheable));
+  ConfigManager* cm = ConfigManager::Instance();
+  cm->LoadPolicies(true);
+  EXPECT_STREQ(cm->GetDownloadPreferenceGroupPolicy(nullptr), _T("cacheable"));
+  ClearGroupPolicies();
+  EXPECT_STREQ(cm->GetDownloadPreferenceGroupPolicy(nullptr), _T(""));
+  RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
+  EXPECT_SUCCEEDED(RegKey::DeleteValue(MACHINE_REG_UPDATE_DEV,
+                                       kRegValueIsEnrolledToDomain));
 }
 
 }  // namespace omaha

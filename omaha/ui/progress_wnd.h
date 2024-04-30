@@ -171,10 +171,9 @@ class ProgressWnd
   virtual bool MaybeCloseWindow();
 
   // Helpers.
-  HRESULT LaunchCmdLine(const AppCompletionInfo& app_info);
-  bool LaunchCmdLines(const ObserverCompletionInfo& info);
   HRESULT ChangeControlState();
   HRESULT SetMarqueeMode(bool is_marquee);
+  void DisplayNewState(const CString& state);
 
   bool IsInstallStoppedWindowPresent();
 
@@ -221,6 +220,8 @@ class ProgressWnd
   bool is_canceled_;
   bool is_chrome_appid_;
 
+  CString base_window_title_;
+
   struct ControlState {
     const int id_;
     const ControlAttributes attr_[ProgressWnd::STATE_END + 1];
@@ -238,4 +239,3 @@ class ProgressWnd
 }  // namespace omaha
 
 #endif  // OMAHA_UI_PROGRESS_WND_H_
-

@@ -52,10 +52,9 @@ const TCHAR* const kQueryStringFormat =
 // Information about where to obtain Omaha info.
 // This must never change in Omaha.
 const TCHAR* const kRegValueProductVersion  = _T("pv");
-const TCHAR* const kRelativeGoopdateRegPath = _T("Software\\Google\\Update\\");
 const TCHAR* const kRelativeClientsGoopdateRegPath =
-    _T("Software\\Google\\Update\\Clients\\")
-    _T("{430FD4D0-B729-4F61-AA34-91526481799D}");
+    _T("Software\\") PATH_COMPANY_NAME _T("\\Update\\Clients\\")
+    GOOPDATE_APP_ID;
 
 // The UpdateDev registry value to override the Code Red url.
 const TCHAR* const kRegValueNameCodeRedUrl = _T("CodeRedUrl");
@@ -226,7 +225,7 @@ HRESULT ResetRecoveryDir(CPath* recovery_dir) {
   *recovery_dir += kRecoveryDirectory;
 
   if (recovery_dir->IsDirectory()) {
-    VERIFY1(SUCCEEDED(DeleteDirectoryContents(*recovery_dir)));
+    VERIFY_SUCCEEDED(DeleteDirectoryContents(*recovery_dir));
     return S_OK;
   }
 
@@ -436,7 +435,7 @@ HRESULT GetDownloadTargetPath(CPath* download_target_path,
   }
 
   *download_target_path = *parent_dir;
-  *download_target_path += _T("GoogleUpdateSetup.crx3");
+  *download_target_path += MAIN_EXE_BASE_NAME _T("Setup.crx3");
   return S_OK;
 }
 
@@ -456,7 +455,7 @@ HRESULT DownloadRepairFile(const CString& download_target_path,
 
   CString url;
   HRESULT hr = GetRegStringValue(true,
-                                 _T("SOFTWARE\\Google\\UpdateDev"),
+                                 _T("SOFTWARE\\") PATH_COMPANY_NAME _T("\\UpdateDev"),
                                  kRegValueNameCodeRedUrl,
                                  &url);
   if (FAILED(hr)) {
@@ -490,35 +489,6 @@ HRESULT RunRepairFile(const CString& file_path, bool is_machine_app) {
   command_line.Append(repair_file_args);
 
   return StartProcess(NULL, command_line.GetBuffer());
-}
-
-enum DomainEnrollementState {UNKNOWN = -1, NOT_ENROLLED, ENROLLED};
-static volatile LONG g_domain_state = UNKNOWN;
-
-bool IsEnrolledToDomain() {
-  DWORD is_enrolled(false);
-  if (SUCCEEDED(GetRegDwordValue(true,
-                                 REG_UPDATE_DEV,
-                                 kRegValueIsEnrolledToDomain,
-                                 &is_enrolled))) {
-    return !!is_enrolled;
-  }
-
-  if (g_domain_state == UNKNOWN) {
-    LPWSTR domain;
-    NETSETUP_JOIN_STATUS join_status;
-    if (::NetGetJoinInformation(NULL, &domain, &join_status) != NERR_Success) {
-      return false;
-    }
-
-    ::NetApiBufferFree(domain);
-    ::InterlockedCompareExchange(&g_domain_state,
-                                 join_status == ::NetSetupDomainName ?
-                                     ENROLLED : NOT_ENROLLED,
-                                 UNKNOWN);
-  }
-
-  return g_domain_state == ENROLLED;
 }
 
 }  // namespace
@@ -618,7 +588,7 @@ HRESULT ValidateAndUnpackCRX(const CPath& from_crx_path,
   }
 
   CPath exe = unpack_under_path;
-  exe += _T("GoogleUpdateSetup.exe");
+  exe += MAIN_EXE_BASE_NAME _T("Setup.exe");
   if (!exe.FileExists()) {
     return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
   }
@@ -641,19 +611,6 @@ HRESULT FixGoogleUpdate(const TCHAR* app_guid,
                         void* context) {
   if (!app_guid || !app_version || !app_language || !download_callback) {
     return E_INVALIDARG;
-  }
-
-  DWORD update_check_period_override_minutes(UINT_MAX);
-
-  if (omaha::IsEnrolledToDomain()) {
-    HRESULT hr = omaha::GetRegDwordValue(
-                     true,
-                     GOOPDATE_POLICIES_RELATIVE,
-                     omaha::kRegValueAutoUpdateCheckPeriodOverrideMinutes,
-                     &update_check_period_override_minutes);
-    if (SUCCEEDED(hr) && (0 == update_check_period_override_minutes)) {
-      return HRESULT_FROM_WIN32(ERROR_ACCESS_DISABLED_BY_POLICY);
-    }
   }
 
   CPath download_target_path;

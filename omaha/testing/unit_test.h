@@ -87,7 +87,7 @@ CString GetSzValue(const CString& full_key_name, const CString& value_name);
 GUID StringToGuid(const CString& str);
 
 const TCHAR* const kRegistryHiveOverrideRoot =
-    _T("HKCU\\Software\\") _T(SHORT_COMPANY_NAME_ANSI)
+    _T("HKCU\\Software\\") _T(PATH_COMPANY_NAME_ANSI)
     _T("\\") _T(PRODUCT_NAME_ANSI)
     _T("\\UnitTest\\");
 const TCHAR* const kCsidlSystemIdsRegKey =
@@ -198,6 +198,13 @@ void CreateDirs(const TCHAR* parent_dir,
 void CreateFiles(const TCHAR* parent_dir,
                  const FileStruct files[],
                  size_t number_of_files);
+
+HRESULT SetPolicy(const TCHAR* policy_name, DWORD value);
+HRESULT SetPolicyString(const TCHAR* policy_name, const CString& value);
+
+// Deletes the group policy registry keys for Omaha and reloads the
+// ConfigManager policies to reset them.
+void ClearGroupPolicies();
 
 }  // namespace omaha
 

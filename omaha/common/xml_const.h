@@ -132,6 +132,7 @@ extern const TCHAR* const kStateCancelled;
 extern const TCHAR* const kStatus;
 extern const TCHAR* const kSuccessAction;
 extern const TCHAR* const kSuccessUrl;
+extern const TCHAR* const kTargetChannel;
 extern const TCHAR* const kTargetVersionPrefix;
 extern const TCHAR* const kTestSource;
 extern const TCHAR* const kTerminateAllBrowsers;
@@ -155,9 +156,6 @@ extern const TCHAR* const kAppDefinedPrefix;
 
 namespace value {
 
-extern const TCHAR* const kArchAmd64;
-extern const TCHAR* const kArchIntel;
-extern const TCHAR* const kArchUnknown;
 extern const TCHAR* const kBits;
 extern const TCHAR* const kCacheable;
 extern const TCHAR* const kClientRegulated;

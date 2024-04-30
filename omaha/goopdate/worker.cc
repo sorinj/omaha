@@ -178,7 +178,7 @@ HRESULT AddUninstalledAppsPings(AppBundle* app_bundle) {
     // AppBundle's lifetime is controlled by the client. Improving the ping
     // architecture, such as having a ping queue managed by the Worker, may
     // enable this.
-    VERIFY1(SUCCEEDED(app_manager.RemoveClientState(app->app_guid())));
+    VERIFY_SUCCEEDED(app_manager.RemoveClientState(app->app_guid()));
   }
 
   return S_OK;
@@ -409,8 +409,6 @@ void Worker::CollectAmbientUsageStats() {
       SUCCEEDED(vista_util::IsUACOn(&is_uac_on))) {
     metric_worker_is_uac_disabled.Set(!is_uac_on);
   }
-
-  metric_worker_is_clickonce_disabled.Set(IsClickOnceDisabled());
 }
 
 HRESULT Worker::CheckForUpdateAsync(AppBundle* app_bundle) {
@@ -455,8 +453,8 @@ void Worker::CheckForUpdateHelper(AppBundle* app_bundle,
   *is_check_successful = false;
 
   if (ConfigManager::Instance()->CanUseNetwork(is_machine_)) {
-    VERIFY1(SUCCEEDED(internal::SendOemInstalledPing(
-        is_machine_, app_bundle->session_id())));
+    VERIFY_SUCCEEDED(internal::SendOemInstalledPing(
+        is_machine_, app_bundle->session_id()));
   }
 
   scoped_impersonation impersonate_user(app_bundle->impersonation_token());
@@ -512,7 +510,7 @@ void Worker::CheckForUpdateHelper(AppBundle* app_bundle,
                     hr);
   CString event_text;
   CString url;
-  VERIFY1(SUCCEEDED(ConfigManager::Instance()->GetUpdateCheckUrl(&url)));
+  VERIFY_SUCCEEDED(ConfigManager::Instance()->GetUpdateCheckUrl(&url));
   SafeCStringFormat(&event_text, _T("url=%s\n%s"),
                     url,
                     app_bundle->FetchAndResetLogText());
@@ -865,8 +863,18 @@ HRESULT Worker::CacheOfflinePackages(AppBundle* app_bundle) {
         }
       }
 
-      HRESULT hr = download_manager_->CachePackage(package,
-                                                   &offline_package_path);
+      File offline_package_file;
+      HRESULT hr = offline_package_file.OpenShareMode(offline_package_path,
+                                                      false,
+                                                      false,
+                                                      FILE_SHARE_READ);
+      if (FAILED(hr)) {
+        return hr;
+      }
+
+      hr = download_manager_->CachePackage(package,
+                                           &offline_package_file,
+                                           &offline_package_path);
       if (FAILED(hr)) {
         CORE_LOG(LE, (_T("[CachePackage failed][%s][%s][0x%x][%Iu]"),
                       app->app_guid_string(), offline_package_path, hr, j));
@@ -1001,9 +1009,9 @@ void Worker::DoPostUpdateCheck(AppBundle* app_bundle,
   ASSERT1(app_bundle);
   ASSERT1(update_response);
 
-  VERIFY1(SUCCEEDED(update_response_utils::ApplyExperimentLabelDeltas(
+  VERIFY_SUCCEEDED(update_response_utils::ApplyExperimentLabelDeltas(
       is_machine_,
-      update_response)));
+      update_response));
 
   PersistRetryAfter(app_bundle->update_check_client()->retry_after_sec());
 
@@ -1018,8 +1026,8 @@ void Worker::DoPostUpdateCheck(AppBundle* app_bundle,
   }
 
   if (app_bundle->is_offline_install()) {
-    VERIFY1(SUCCEEDED(CacheOfflinePackages(app_bundle)));
-    VERIFY1(SUCCEEDED(DeleteDirectory(app_bundle->offline_dir())));
+    VERIFY_SUCCEEDED(CacheOfflinePackages(app_bundle));
+    VERIFY_SUCCEEDED(DeleteDirectory(app_bundle->offline_dir()));
   }
 }
 
@@ -1048,19 +1056,21 @@ HRESULT Worker::QueueDeferredFunctionCall0(
   ASSERT1(app_bundle.get());
   ASSERT1(deferred_function);
 
-  using Callback = ThreadPoolCallBack1<Worker, std::shared_ptr<AppBundle> >;
+  using Callback = ThreadPoolCallBack1<Worker, std::shared_ptr<AppBundle>>;
   auto callback = std::make_unique<Callback>(this,
                                              deferred_function,
                                              app_bundle);
-  HRESULT hr = Goopdate::Instance().QueueUserWorkItem(callback.get(),
+  UserWorkItem* user_work_item = callback.get();
+  HRESULT hr = Goopdate::Instance().QueueUserWorkItem(std::move(callback),
                                                       COINIT_MULTITHREADED,
                                                       WT_EXECUTELONGFUNCTION);
   if (FAILED(hr)) {
     return hr;
   }
 
-  // Transfers the ownership of the callback from Worker to ThreadPool.
-  app_bundle->set_user_work_item(callback.release());
+  // This object is owned by the thread pool but the |app_bundle| maintains
+  // a dependency on it for debugging purposes.
+  app_bundle->set_user_work_item(user_work_item);
   return S_OK;
 }
 
@@ -1079,15 +1089,17 @@ HRESULT Worker::QueueDeferredFunctionCall1(
                                              deferred_function,
                                              app_bundle,
                                              p1);
-  HRESULT hr = Goopdate::Instance().QueueUserWorkItem(callback.get(),
+  UserWorkItem* user_work_item = callback.get();
+  HRESULT hr = Goopdate::Instance().QueueUserWorkItem(std::move(callback),
                                                       COINIT_MULTITHREADED,
                                                       WT_EXECUTELONGFUNCTION);
   if (FAILED(hr)) {
     return hr;
   }
 
-  // Transfers the ownership of the callback from Worker to ThreadPool.
-  app_bundle->set_user_work_item(callback.release());
+  // This object is owned by the thread pool but the |app_bundle| maintains
+  // a dependency on it for debugging purposes.
+  app_bundle->set_user_work_item(user_work_item);
   return S_OK;
 }
 

@@ -31,13 +31,12 @@
 
 #include "omaha/enterprise/installer/custom_actions/msi_custom_action.h"
 
-#define SOFTWARE_GOOGLE_UPDATE L"Software\\Google\\Update"
+#define SOFTWARE_GOOGLE_UPDATE L"Software\\" PATH_COMPANY_NAME_ANSI "\\Update"
 #define SOFTWARE_GOOGLE_UPDATE_CLIENTSTATE \
     SOFTWARE_GOOGLE_UPDATE L"\\ClientState"
 
 namespace {
 
-const int kGuidStringLength = 38;  // 128/4 + 4 dashes + 2 braces.
 const DWORD kInstallerResultFailedCustomError = 1;
 const wchar_t kPropertyCustomActionData[] = L"CustomActionData";
 const wchar_t kRegKeyClientState[] = SOFTWARE_GOOGLE_UPDATE_CLIENTSTATE;

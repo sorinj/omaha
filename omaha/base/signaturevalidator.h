@@ -166,13 +166,11 @@ class CertList {
   }
 
   // FindFirstCert() finds the first certificate that exactly matches the given
-  // criteria. If allow_test_variant is true, the company name will also be
-  // deemed valid if it equals company_name_to_match + " (TEST)".
+  // criteria.
   void FindFirstCert(const CertInfo** result_cert_info,
                      const std::vector<CString>& company_name_to_match,
                      const CString &orgn_unit_to_match,
                      const CString &trust_authority_to_match,
-                     bool allow_test_variant,
                      bool check_cert_is_valid_now) const;
 
   typedef std::vector<CertInfo*> CertInfoList;
@@ -181,16 +179,16 @@ class CertList {
   CertInfoList cert_list_;
 };
 
-
 // ExtractAllCertificatesFromSignature() takes in a signed file, extracts all
 // the certificates related to its signature and returns them in a CertList
-// object.
+// object. `subject_name` can be used to narrow the list of certificates to only
+// those that match the given subject string.
 void ExtractAllCertificatesFromSignature(const wchar_t* signed_file,
+                                         const wchar_t* subject_name,
                                          CertList* cert_list);
 
 // Returns true if the subject of the certificate exactly matches the first CN
-// name. If the 'allow_test_variant' parameter is true, the function tries to
-// match the "subject (TEST)" string.
+// name.
 //
 // The function enforces an additional check against the public key of the
 // certificate. Pinning to specific public keys mitigates the risk of accepting
@@ -201,7 +199,6 @@ void ExtractAllCertificatesFromSignature(const wchar_t* signed_file,
 // call.
 HRESULT VerifyCertificate(const wchar_t* signed_file,
                           const std::vector<CString>& subject,
-                          bool allow_test_variant,
                           bool check_cert_is_valid_now,
                           const std::vector<CString>* expected_hashes);
 

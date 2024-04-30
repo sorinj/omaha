@@ -267,22 +267,19 @@ TCHAR *ReportSummaryGenerator::GetReportSummary() {
   if (s) {
     s[0] = 0;
     if (g_total_reports) {
-      SafeStrCat(s, L"REPORT SUMMARY:\r\n\r\n", kMaxReportSummaryLen);
-      SafeStrCat(s,
-                 SPRINTF(L"%d total reports\r\n\r\n", g_total_reports),
-                 kMaxReportSummaryLen);
-      SafeStrCat(s,
+      wcscat_s(s, kMaxReportSummaryLen, L"REPORT SUMMARY:\r\n\r\n");
+      wcscat_s(s, kMaxReportSummaryLen,
+                 SPRINTF(L"%d total reports\r\n\r\n", g_total_reports));
+      wcscat_s(s, kMaxReportSummaryLen,
                  g_report_summary.
-                     Left(kMaxReportSummaryLen - lstrlen(s) - 1).GetString(),
-                 kMaxReportSummaryLen);
+                     Left(kMaxReportSummaryLen - lstrlen(s) - 1).GetString());
       CString report_string = g_report_ids.DebugReportString();
       ReplaceCString(report_string, L"&", L"\r\n");
-      SafeStrCat(s,
+      wcscat_s(s, kMaxReportSummaryLen,
                  report_string.
-                     Left(kMaxReportSummaryLen - lstrlen(s) - 1).GetString(),
-                 kMaxReportSummaryLen);
+                     Left(kMaxReportSummaryLen - lstrlen(s) - 1).GetString());
     } else {
-      SafeStrCat(s, L"NO REPORTS!!\r\n", kMaxReportSummaryLen);
+      wcscat_s(s, kMaxReportSummaryLen, L"NO REPORTS!!\r\n");
     }
   }
 
@@ -587,7 +584,7 @@ bool DebugReport(unsigned int id,
            arraysize(clipboard_string));
   stack_trace = stack_trace.Left(
       arraysize(clipboard_string) - lstrlen(clipboard_string) - 1);
-  SafeStrCat(clipboard_string, stack_trace, arraysize(clipboard_string));
+  wcscat_s(clipboard_string, arraysize(clipboard_string), stack_trace);
   SetClipboard(clipboard_string);
 
   stack_trace = stack_trace.Left(kMaxStackTraceDialogLen);
@@ -665,7 +662,7 @@ ReportIds::~ReportIds() {
   }
 }
 
-const TCHAR* const GetRegKeyShared() {
+const TCHAR* GetRegKeyShared() {
   return vista_util::IsUserAdmin() ? _T("HKLM\\") kCiRegKeyShared :
                                      _T("HKCU\\") kCiRegKeyShared;
 }
@@ -927,9 +924,9 @@ TCHAR * __cdecl SPRINTF(const TCHAR * format, ...) {
   va_end(argptr);
 
   // copy to fixed return buffers
-  SafeStrCat(sprintf_buf,
-             out.GetBufferSetLength(kSprintfMaxLen),
-             g_current_sprintf_buffer);
+  wcscat_s(sprintf_buf,
+           g_current_sprintf_buffer,
+           out.GetBufferSetLength(kSprintfMaxLen));
   sprintf_buf[kSprintfMaxLen] = '\0';
 
   return sprintf_buf;
@@ -1000,10 +997,9 @@ bool ReleaseAssert(const char *expr,
            filename,
            linenumber,
            VER_TIMESTAMP_STR_FILE);
-  SafeStrCat(error_string, msg, arraysize(error_string));
-  SafeStrCat(error_string,
-             L"\r\n\r\n*** This message has been copied to the clipboard. ***",
-             arraysize(error_string));
+  wcscat_s(error_string, arraysize(error_string), msg);
+  wcscat_s(error_string, arraysize(error_string),
+             L"\r\n\r\n*** This message has been copied to the clipboard. ***");
   SetClipboard(error_string);
 
   TCHAR title_string[1024];
@@ -1049,10 +1045,9 @@ void ReleaseAbort(const TCHAR *msg,
            filename,
            linenumber,
            omaha::GetVersionString());
-  SafeStrCat(error_string, msg, arraysize(error_string));
-  SafeStrCat(error_string,
-             L"\r\n\r\n*** This message has been copied to the clipboard. ***",
-             arraysize(error_string));
+  wcscat_s(error_string, arraysize(error_string), msg);
+  wcscat_s(error_string, arraysize(error_string),
+             L"\r\n\r\n*** This message has been copied to the clipboard. ***");
   SetClipboard(error_string);
 
   TCHAR title_string[1024];
@@ -1072,70 +1067,6 @@ void ReleaseAbort(const TCHAR *msg,
 }
 #endif
 
-
-#ifdef _DEBUG
-
-void DumpInterface(IUnknown* unknown) {
-  if (!unknown)
-    return;
-
-  OutputDebugString(_T("------------------------------------------------\r\n"));
-
-  // Open the HKCR\Interfaces key where the IIDs of marshalable interfaces
-  // are stored.
-  RegKey key;
-  if (SUCCEEDED(key.Open(HKEY_CLASSES_ROOT, _T("Interface"), KEY_READ))) {
-    TCHAR name[_MAX_PATH + 1] = {0};
-    DWORD name_size = _MAX_PATH;
-    DWORD index = 0;
-    FILETIME last_written;
-
-    //
-    // Enumerate through the IIDs and see if the object supports it
-    // by calling QueryInterface.
-    //
-    while (::RegEnumKeyEx(key.Key(),
-                          index++,
-                          name,
-                          &name_size,
-                          NULL,
-                          NULL,
-                          NULL,
-                          &last_written) == ERROR_SUCCESS) {
-      // Convert the string to an IID
-      IID iid;
-      HRESULT hr = StringToGuidSafe(name, &iid);
-
-      CComPtr<IUnknown> test;
-      if (unknown->QueryInterface(iid,
-                                  reinterpret_cast<void**>(&test)) == S_OK) {
-        //
-        // The object supports this interface.
-        // See if we can get a human readable name for the interface
-        // If not, the name buffer already contains the string
-        // representation of the IID, which we'll use as a fallback.
-        //
-        RegKey sub_key;
-        if (sub_key.Open(key.Key(), name, KEY_READ) == S_OK) {
-          std::unique_ptr<TCHAR[]> display;
-          // If this fails, we should still have the IID
-          if (sub_key.GetValue(NULL, &display) == S_OK)
-            lstrcpyn(name, display.get(), _MAX_PATH);
-        }
-
-        CString fmt;
-        SafeCStringFormat(&fmt, _T("  %s\r\n"), name);
-        OutputDebugString(fmt);
-      }
-
-      ZeroMemory(name, arraysize(name));
-      name_size = _MAX_PATH;
-    }
-  }
-
-  OutputDebugString(_T("------------------------------------------------\r\n"));
-}
-#endif
 
 // TODO(omaha): the implementation below is using CStrings so it is not very
 // conservative in terms of memory allocations.

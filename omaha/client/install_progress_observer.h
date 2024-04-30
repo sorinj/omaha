@@ -32,7 +32,7 @@ namespace omaha {
 // restart browser AND launchcmd?
 // If we keep this enum, rename to something like CompletionTypes to make it
 // clear that it is describing the desired behavior of the observer. This also
-// differentiates the name from LegacyCompetionCodes.
+// differentiates the name from LegacyCompletionCodes.
 // TODO(omaha): If the codes below change, need a conversion method to convert
 // to LegacyCompletionCodes.
 typedef enum {
@@ -154,6 +154,9 @@ class InstallProgressObserver {
   virtual void OnPause() = 0;
   virtual void OnComplete(const ObserverCompletionInfo& observer_info) = 0;
 };
+
+// Launches the post-install launch command lines for each app in `info`.
+bool LaunchCommandLines(const ObserverCompletionInfo& info, bool is_machine);
 
 }  // namespace omaha
 

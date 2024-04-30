@@ -100,7 +100,7 @@ class ATL_NO_VTABLE Update3Web
     REGMAP_ENTRY(_T("HKROOT"), T::hk_root())
     REGMAP_ENTRY(_T("VERSION"), _T("1.0"))
     REGMAP_ENTRY(_T("PROGID"), T::prog_id())
-    REGMAP_ENTRY(_T("DESCRIPTION"), _T("GoogleUpdate Update3Web"))
+    REGMAP_ENTRY(_T("DESCRIPTION"), MAIN_EXE_BASE_NAME _T(" Update3Web"))
     REGMAP_ENTRY(_T("CLSID"), T::class_id())
     REGMAP_MODULE2(_T("MODULE"), kOmahaOnDemandFileName)
     REGMAP_ENTRY(_T("ICONRESID"), PP_STRINGIZE(IDI_ELEVATION_MONIKER_ICON))
@@ -117,30 +117,30 @@ class ATL_NO_VTABLE Update3Web
 
 struct Update3WebModeUser {
   static bool is_machine() { return false; }
-  static const TCHAR* const prog_id() { return kProgIDUpdate3WebUser; }
+  static const TCHAR* prog_id() { return kProgIDUpdate3WebUser; }
   static GUID class_id() { return __uuidof(GoogleUpdate3WebUserClass); }
   static UINT registry_res_id() { return IDR_LOCAL_SERVER_RGS; }
-  static const TCHAR* const hk_root() { return _T("HKCU"); }
+  static const TCHAR* hk_root() { return _T("HKCU"); }
 };
 
 struct Update3WebModeMachineFallback {
   static bool is_machine() { return true; }
-  static const TCHAR* const prog_id() {
+  static const TCHAR* prog_id() {
     return kProgIDUpdate3WebMachineFallback;
   }
   static GUID class_id() {
     return __uuidof(GoogleUpdate3WebMachineFallbackClass);
   }
   static UINT registry_res_id() { return IDR_LOCAL_SERVER_ELEVATION_RGS; }
-  static const TCHAR* const hk_root() { return _T("HKLM"); }
+  static const TCHAR* hk_root() { return _T("HKLM"); }
 };
 
 struct Update3WebModeService {
   static bool is_machine() { return true; }
-  static const TCHAR* const prog_id() { return kProgIDUpdate3WebSvc; }
+  static const TCHAR* prog_id() { return kProgIDUpdate3WebSvc; }
   static GUID class_id() { return __uuidof(GoogleUpdate3WebServiceClass); }
   static UINT registry_res_id() { return IDR_LOCAL_SERVICE_RGS; }
-  static const TCHAR* const hk_root() { return _T("HKLM"); }
+  static const TCHAR* hk_root() { return _T("HKLM"); }
 };
 
 typedef Update3Web<Update3WebModeUser> Update3WebUser;

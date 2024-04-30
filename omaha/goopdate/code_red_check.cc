@@ -18,6 +18,7 @@
 #include "omaha/base/scoped_impersonation.h"
 #include "omaha/base/utils.h"
 #include "omaha/base/vista_utils.h"
+#include "omaha/common/config_manager.h"
 #include "omaha/common/goopdate_utils.h"
 #include "omaha/goopdate/goopdate_metrics.h"
 #include "omaha/net/network_request.h"
@@ -147,16 +148,19 @@ HRESULT DownloadCodeRedFileAsLoggedOnUser(const TCHAR* url,
     }
   }
 
-  const DWORD kMoveFlag = MOVEFILE_COPY_ALLOWED |
-                          MOVEFILE_REPLACE_EXISTING |
-                          MOVEFILE_WRITE_THROUGH;
-  if (!::MoveFileEx(download_target_path,
-                    file_path,
-                    kMoveFlag)) {
+  if (!::CopyFile(download_target_path, file_path, FALSE)) {
     hr = HRESULT_FROM_WIN32(::GetLastError());
   }
 
-  ::DeleteFile(download_target_path);
+  {
+    scoped_impersonation impersonate_user(get(logged_on_user_token));
+    HRESULT hr_impersonation = HRESULT_FROM_WIN32(impersonate_user.result());
+    if (FAILED(hr_impersonation)) {
+      return hr_impersonation;
+    }
+
+    ::DeleteFile(download_target_path);
+  }
   return hr;
 }
 
@@ -198,6 +202,14 @@ HRESULT CodeRedDownloadCallback(const TCHAR* url,
 }  // namespace
 
 HRESULT CheckForCodeRed(bool is_machine, const CString& omaha_version) {
+  bool is_period_overridden = false;
+  const int update_interval =
+      ConfigManager::Instance()->GetLastCheckPeriodSec(&is_period_overridden);
+  if (is_period_overridden && 0 == update_interval) {
+    OPT_LOG(L1, (_T("[GetLastCheckPeriodSec is 0][code red checks disabled]")));
+    return HRESULT_FROM_WIN32(ERROR_ACCESS_DISABLED_BY_POLICY);
+  }
+
   HRESULT hr = FixGoogleUpdate(kGoogleUpdateAppId,
                                omaha_version,
                                _T(""),     // Omaha doesn't have a language.

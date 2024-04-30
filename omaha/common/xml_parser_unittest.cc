@@ -25,15 +25,6 @@
 #include "omaha/goopdate/update_response_utils.h"
 #include "omaha/testing/unit_test.h"
 
-namespace {
-
-const int kSeedManifestFileCount = 1;
-const int kSeedManifestResponseCount = 7;
-
-const int kExpectedRequestLength = 2048;
-
-}  // namespace
-
 namespace omaha {
 
 namespace xml {
@@ -48,8 +39,12 @@ class XmlParserTest : public ::testing::TestWithParam<bool> {
     return GetParam();
   }
 
-  virtual void SetUp() {
-    RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
+  void SetUp() override {
+    ClearGroupPolicies();
+  }
+
+  void TearDown() override {
+    ClearGroupPolicies();
   }
 
   // Allows test fixtures access to implementation details of UpdateRequest.
@@ -103,6 +98,7 @@ TEST_F(XmlParserTest, GenerateRequestWithoutUserId_MachineUpdateRequest) {
   app1.update_check.is_valid = true;
   app1.update_check.is_rollback_allowed = true;
   app1.update_check.target_version_prefix = "55.2";
+  app1.update_check.target_channel = "dev";
   app1.data.push_back(data1);
   app1.data.push_back(data2);
   app1.ping.active = ACTIVE_NOTRUN;
@@ -128,7 +124,7 @@ TEST_F(XmlParserTest, GenerateRequestWithoutUserId_MachineUpdateRequest) {
   app2.cohort_name = _T("Name2");
   xml_request.apps.push_back(app2);
 
-  CString expected_buffer = _T("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request protocol=\"3.0\" updater=\"Omaha\" updaterversion=\"1.2.3.4\" shell_version=\"1.2.1.1\" ismachine=\"1\" sessionid=\"unittest_session\" installsource=\"unittest_install\" originurl=\"http://go/foo/&quot;\" testsource=\"dev\" requestid=\"{387E2718-B39C-4458-98CC-24B5293C8383}\" periodoverridesec=\"100000\" dedup=\"cr\" domainjoined=\"1\"><hw physmemory=\"2\" sse=\"1\" sse2=\"1\" sse3=\"1\" ssse3=\"1\" sse41=\"1\" sse42=\"1\" avx=\"1\"/><os platform=\"win\" version=\"6.0\" sp=\"Service Pack 1\" arch=\"x86\"/><app appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\" version=\"\" nextversion=\"\" ap=\"ap_with_update_check\" lang=\"en\" brand=\"\" client=\"\" cohort=\"Cohort1\" cohorthint=\"Hint1\" cohortname=\"Name1\"><updatecheck rollback_allowed=\"true\" targetversionprefix=\"55.2\"/><data name=\"install\" index=\"verboselogging\"/><data name=\"untrusted\">some untrusted data</data><ping active=\"0\" r=\"5\" rd=\"2535\"/></app><app appid=\"{AD3D0CC0-AD1E-4b1f-B98E-BAA41DCE396C}\" version=\"1.0\" nextversion=\"2.0\" ap=\"ap_with_no_update_check\" lang=\"en\" brand=\"\" client=\"\" experiments=\"url_exp_2=a|Fri, 14 Aug 2015 16:13:03 GMT\" cohort=\"Cohort2\" cohorthint=\"Hint2\" cohortname=\"Name2\"/></request>");  // NOLINT
+  CString expected_buffer = _T("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request protocol=\"3.0\" updater=\"Omaha\" updaterversion=\"1.2.3.4\" shell_version=\"1.2.1.1\" ismachine=\"1\" sessionid=\"unittest_session\" installsource=\"unittest_install\" originurl=\"http://go/foo/&quot;\" testsource=\"dev\" requestid=\"{387E2718-B39C-4458-98CC-24B5293C8383}\" periodoverridesec=\"100000\" dedup=\"cr\" domainjoined=\"1\"><hw physmemory=\"2\" sse=\"1\" sse2=\"1\" sse3=\"1\" ssse3=\"1\" sse41=\"1\" sse42=\"1\" avx=\"1\"/><os platform=\"win\" version=\"6.0\" sp=\"Service Pack 1\" arch=\"x86\"/><app appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\" version=\"\" nextversion=\"\" ap=\"ap_with_update_check\" lang=\"en\" brand=\"\" client=\"\" cohort=\"Cohort1\" cohorthint=\"Hint1\" cohortname=\"Name1\"><updatecheck rollback_allowed=\"true\" targetversionprefix=\"55.2\" release_channel=\"dev\"/><data name=\"install\" index=\"verboselogging\"/><data name=\"untrusted\">some untrusted data</data><ping active=\"0\" r=\"5\" rd=\"2535\"/></app><app appid=\"{AD3D0CC0-AD1E-4b1f-B98E-BAA41DCE396C}\" version=\"1.0\" nextversion=\"2.0\" ap=\"ap_with_no_update_check\" lang=\"en\" brand=\"\" client=\"\" experiments=\"url_exp_2=a|Fri, 14 Aug 2015 16:13:03 GMT\" cohort=\"Cohort2\" cohorthint=\"Hint2\" cohortname=\"Name2\"/></request>");  // NOLINT
 
   CString actual_buffer;
   EXPECT_HRESULT_SUCCEEDED(XmlParser::SerializeRequest(*update_request,
@@ -243,8 +239,53 @@ TEST_F(XmlParserTest, Parse) {
   // Array of two request strings that are almost same except the second one
   // contains some unsupported elements that we expect to be ignored.
   CStringA buffer_strings[] = {
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><response protocol=\"3.0\"><systemrequirements platform=\"win\" arch=\"x86\" min_os_version=\"6.0\"/><daystart elapsed_seconds=\"8400\" elapsed_days=\"3255\" /><app appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\" status=\"ok\" cohort=\"Cohort1\" cohorthint=\"Hint1\" cohortname=\"Name1\" experiments=\"url_exp_2=a|Fri, 14 Aug 2015 16:13:03 GMT\"><updatecheck status=\"ok\"><urls><url codebase=\"http://cache.pack.google.com/edgedl/chrome/install/172.37/\"/></urls><manifest version=\"2.0.172.37\"><packages><package hash_sha256=\"d5e06b4436c5e33f2de88298b890f47815fc657b63b3050d2217c55a5d0730b0\" hash=\"NT/6ilbSjWgbVqHZ0rT1vTg1coE=\" name=\"chrome_installer.exe\" required=\"true\" size=\"9614320\"/></packages><actions><action arguments=\"--do-not-launch-chrome\" event=\"install\" needsadmin=\"false\" run=\"chrome_installer.exe\"/><action event=\"postinstall\" onsuccess=\"exitsilentlyonlaunchcmd\"/></actions></manifest></updatecheck><data index=\"verboselogging\" name=\"install\" status=\"ok\">{\n \"distribution\": {\n   \"verbose_logging\": true\n }\n}\n</data><data name=\"untrusted\" status=\"ok\"/><ping status=\"ok\"/></app></response>",  // NOLINT
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><response protocol=\"3.0\" ExtraUnsupportedAttribute=\"123\"><daystart elapsed_seconds=\"8400\" elapsed_days=\"3255\" /><UnsupportedElement1 UnsupportedAttribute1=\"some value\" /><app appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\" status=\"ok\" cohort=\"Cohort1\" cohorthint=\"Hint1\" cohortname=\"Name1\" experiments=\"url_exp_2=a|Fri, 14 Aug 2015 16:13:03 GMT\"><updatecheck status=\"ok\"><urls><url codebase=\"http://cache.pack.google.com/edgedl/chrome/install/172.37/\"/></urls><manifest version=\"2.0.172.37\"><packages><package hash_sha256=\"d5e06b4436c5e33f2de88298b890f47815fc657b63b3050d2217c55a5d0730b0\" hash=\"NT/6ilbSjWgbVqHZ0rT1vTg1coE=\" name=\"chrome_installer.exe\" required=\"true\" size=\"9614320\"/></packages><actions><action arguments=\"--do-not-launch-chrome\" event=\"install\" needsadmin=\"false\" run=\"chrome_installer.exe\"/><action event=\"postinstall\" onsuccess=\"exitsilentlyonlaunchcmd\"/></actions></manifest></updatecheck><data index=\"verboselogging\" name=\"install\" status=\"ok\">{\n \"distribution\": {\n   \"verbose_logging\": true\n }\n}\n</data><data name=\"untrusted\" status=\"ok\"/><ping status=\"ok\"/></app><UnsupportedElement2 UnsupportedAttribute2=\"Unsupported value\" >Some strings inside an unsupported element, should be ignored.<ping status=\"ok\"/></UnsupportedElement2></response>",  // NOLINT
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><response "
+      "protocol=\"3.0\"><systemrequirements platform=\"win\" "
+      "arch=\"x86,-arm64\" min_os_version=\"6.0\"/><daystart "
+      "elapsed_seconds=\"8400\" elapsed_days=\"3255\" /><app "
+      "appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\" status=\"ok\" "
+      "cohort=\"Cohort1\" cohorthint=\"Hint1\" cohortname=\"Name1\" "
+      "experiments=\"url_exp_2=a|Fri, 14 Aug 2015 16:13:03 GMT\"><updatecheck "
+      "status=\"ok\"><urls><url "
+      "codebase=\"http://cache.pack.google.com/edgedl/chrome/install/172.37/\"/"
+      "></urls><manifest version=\"2.0.172.37\"><packages><package "
+      "hash_sha256="
+      "\"d5e06b4436c5e33f2de88298b890f47815fc657b63b3050d2217c55a5d0730b0\" "
+      "hash=\"NT/6ilbSjWgbVqHZ0rT1vTg1coE=\" name=\"chrome_installer.exe\" "
+      "required=\"true\" size=\"9614320\"/></packages><actions><action "
+      "arguments=\"--do-not-launch-chrome\" event=\"install\" "
+      "needsadmin=\"false\" run=\"chrome_installer.exe\"/><action "
+      "event=\"postinstall\" "
+      "onsuccess=\"exitsilentlyonlaunchcmd\"/></actions></manifest></"
+      "updatecheck><data index=\"verboselogging\" name=\"install\" "
+      "status=\"ok\">{\n \"distribution\": {\n   \"verbose_logging\": true\n "
+      "}\n}\n</data><data name=\"untrusted\" status=\"ok\"/><ping "
+      "status=\"ok\"/></app></response>",  // NOLINT
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?><response protocol=\"3.0\" "
+      "ExtraUnsupportedAttribute=\"123\"><daystart elapsed_seconds=\"8400\" "
+      "elapsed_days=\"3255\" /><UnsupportedElement1 "
+      "UnsupportedAttribute1=\"some value\" /><app "
+      "appid=\"{8A69D345-D564-463C-AFF1-A69D9E530F96}\" status=\"ok\" "
+      "cohort=\"Cohort1\" cohorthint=\"Hint1\" cohortname=\"Name1\" "
+      "experiments=\"url_exp_2=a|Fri, 14 Aug 2015 16:13:03 GMT\"><updatecheck "
+      "status=\"ok\"><urls><url "
+      "codebase=\"http://cache.pack.google.com/edgedl/chrome/install/172.37/\"/"
+      "></urls><manifest version=\"2.0.172.37\"><packages><package "
+      "hash_sha256="
+      "\"d5e06b4436c5e33f2de88298b890f47815fc657b63b3050d2217c55a5d0730b0\" "
+      "hash=\"NT/6ilbSjWgbVqHZ0rT1vTg1coE=\" name=\"chrome_installer.exe\" "
+      "required=\"true\" size=\"9614320\"/></packages><actions><action "
+      "arguments=\"--do-not-launch-chrome\" event=\"install\" "
+      "needsadmin=\"false\" run=\"chrome_installer.exe\"/><action "
+      "event=\"postinstall\" "
+      "onsuccess=\"exitsilentlyonlaunchcmd\"/></actions></manifest></"
+      "updatecheck><data index=\"verboselogging\" name=\"install\" "
+      "status=\"ok\">{\n \"distribution\": {\n   \"verbose_logging\": true\n "
+      "}\n}\n</data><data name=\"untrusted\" status=\"ok\"/><ping "
+      "status=\"ok\"/></app><UnsupportedElement2 "
+      "UnsupportedAttribute2=\"Unsupported value\" >Some strings inside an "
+      "unsupported element, should be ignored.<ping "
+      "status=\"ok\"/></UnsupportedElement2></response>",
   };
 
   for (int i = 0; i < arraysize(buffer_strings); i++) {
@@ -322,7 +363,7 @@ TEST_F(XmlParserTest, Parse) {
               update_response_utils::ValidateUntrustedData(app.data));
 
     EXPECT_STREQ(i == 0 ? _T("win") : _T(""), xml_response.sys_req.platform);
-    EXPECT_STREQ(i == 0 ? _T("x86") : _T(""), xml_response.sys_req.arch);
+    EXPECT_STREQ(i == 0 ? _T("x86,-arm64") : _T(""), xml_response.sys_req.arch);
     EXPECT_STREQ(i == 0 ? _T("6.0") : _T(""),
                  xml_response.sys_req.min_os_version);
   }
@@ -492,9 +533,8 @@ TEST_P(XmlParserTest, DlPref) {
                                     kRegValueIsEnrolledToDomain,
                                     IsDomain() ? 1UL : 0UL));
 
-  EXPECT_HRESULT_SUCCEEDED(RegKey::SetValue(kRegKeyGoopdateGroupPolicy,
-                                            kRegValueDownloadPreference,
-                                            kDownloadPreferenceCacheable));
+  EXPECT_SUCCEEDED(SetPolicyString(kRegValueDownloadPreference,
+                                   kDownloadPreferenceCacheable));
 
   std::unique_ptr<UpdateRequest> update_request(
         UpdateRequest::Create(false, _T(""), _T("is"), _T("")));
@@ -531,7 +571,6 @@ TEST_P(XmlParserTest, DlPref) {
   EXPECT_STREQ(expected_buffer, actual_buffer);
 
   RegKey::DeleteValue(MACHINE_REG_UPDATE_DEV, kRegValueIsEnrolledToDomain);
-  RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
 }
 
 TEST_P(XmlParserTest, DlPrefUnknownPolicy) {
@@ -540,9 +579,8 @@ TEST_P(XmlParserTest, DlPrefUnknownPolicy) {
                                     IsDomain() ? 1UL : 0UL));
 
   // If a policy different than "cacheable" is set, then the policy is ignored.
-  EXPECT_HRESULT_SUCCEEDED(RegKey::SetValue(kRegKeyGoopdateGroupPolicy,
-                                            kRegValueDownloadPreference,
-                                            _T("unknown policy")));
+  EXPECT_SUCCEEDED(
+      SetPolicyString(kRegValueDownloadPreference, _T("unknown policy")));
 
   std::unique_ptr<UpdateRequest> update_request(
          UpdateRequest::Create(false, _T(""), _T("is"), _T("")));
@@ -576,7 +614,6 @@ TEST_P(XmlParserTest, DlPrefUnknownPolicy) {
   EXPECT_STREQ(expected_buffer, actual_buffer);
 
   RegKey::DeleteValue(MACHINE_REG_UPDATE_DEV, kRegValueIsEnrolledToDomain);
-  RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
 }
 
 TEST_F(XmlParserTest, PingFreshness) {

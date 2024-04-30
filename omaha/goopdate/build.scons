@@ -66,7 +66,7 @@ def BuildCOMForwarder(cmd_line_switch,
       prog_name='%s_unsigned' % signed_exe_name,
       source=com_forwarder_inputs,
   )
-  signed_broker = com_forwarder_env.DualSignedBinary(
+  signed_broker = com_forwarder_env.SignedBinary(
       target='%s.exe' % signed_exe_name,
       source=unsigned_broker,
   )
@@ -76,7 +76,6 @@ def BuildCOMForwarder(cmd_line_switch,
 # Build the broker/legacy on-demand/WebPlugin forwarders.
 BuildCOMForwarder('/broker', 'GoogleUpdateBroker', False)
 BuildCOMForwarder('/ondemand', 'GoogleUpdateOnDemand', False)
-BuildCOMForwarder('/pi', 'GoogleUpdateWebPlugin', True)
 
 def BuildCOMRegisterShell64():
   com_register_shell_env = env.CloneAndMake64Bit()
@@ -95,13 +94,11 @@ def BuildCOMRegisterShell64():
           '$LIB_DIR/common_64.lib',
           '$LIB_DIR/logging_64.lib',
           '$LIB_DIR/goopdate_lib_64.lib',
-          '$LIB_DIR/security_64.lib',
           com_register_shell_env['atls_libs'][
               com_register_shell_env.Bit('debug')
           ],
           com_register_shell_env['crt_libs'][
               com_register_shell_env.Bit('debug')],
-          'crypt32.lib',
           'delayimp.lib',
           'netapi32.lib',
           'psapi.lib',
@@ -119,14 +116,28 @@ def BuildCOMRegisterShell64():
         ],
     )
 
+  # Add an icon, a manifest, and a version to the exe.
+  # The resource file used is the same as the one for GoogleUpdate.exe.
+  # The version resource used is the same as the one for goopdate.dll.
+  signed_exe_name = 'GoogleUpdateComRegisterShell64'
+  com_register_shell_res = com_register_shell_env.RES(
+                               '%s.res' % signed_exe_name,
+                               '../google_update/resource.rc')
+  com_register_shell_env.Depends(com_register_shell_res,
+                                 '../google_update/GoogleUpdate.manifest')
+  com_register_shell_inputs = [
+       com_register_shell_env.ComponentObject('%s.obj' % signed_exe_name,
+                                              'com_register_shell.cc'),
+       com_register_shell_res,
+       '$OBJ_ROOT/goopdate/goopdate_version.res',
+  ]
+
   unsigned_exe = com_register_shell_env.ComponentProgram(
-      prog_name='GoogleUpdateComRegisterShell64_unsigned',
-      source= [
-          'com_register_shell.cc',
-          ]
+      prog_name='%s_unsigned' % signed_exe_name,
+      source=com_register_shell_inputs
   )
-  signed_exe = com_register_shell_env.DualSignedBinary(
-      target='GoogleUpdateComRegisterShell64.exe',
+  signed_exe = com_register_shell_env.SignedBinary(
+      target='%s.exe' % signed_exe_name,
       source=unsigned_exe,
   )
   env.Replicate('$STAGING_DIR', signed_exe)
@@ -142,7 +153,7 @@ def GenerateOmaha3IDLFile():
   return env.Command(
       target='omaha3_idl.idl',
       source='$MAIN_DIR/goopdate/omaha3_idl.idl',
-      action=('python %s/tools/generate_omaha3_idl.py --idl_template_file '
+      action=('python "%s/tools/generate_omaha3_idl.py" --idl_template_file '
           '$SOURCE --idl_output_file $TARGET' % env['MAIN_DIR'])
   )
 
@@ -206,9 +217,6 @@ def BuildGoogleUpdateHandlerDll(handler_env,
         '/wd4255',
         '/wd4426',
         '/wd5038',
-      ],
-      CPPPATH = [
-          '$OBJ_ROOT',  # Needed for generated files.
       ],
       LIBS = [
           handler_env.GetMultiarchLibName('base'),
@@ -283,7 +291,7 @@ def BuildGoogleUpdateHandlerDll(handler_env,
       source=inputs,
   )
 
-  signed_dll = handler_env.DualSignedBinary(
+  signed_dll = handler_env.SignedBinary(
       target='%s%s%s.dll' % (prefix, psname, suffix),
       source=unsigned_dll,
   )
@@ -309,10 +317,21 @@ if env.Bit('has_device_management'):
   proto_env.Append(PROTO_PATH = '$GOOGLE3')
   proto_env.Append(CPP_OUT = '$TARGET_ROOT/proto_files')
   proto_sources = [
+      '$GOOGLE3/devtools/staticanalysis/pipeline/analyzers/' +
+          'proto_best_practices/proto/optouts.proto',
       '$GOOGLE3/logs/proto/logs_annotations/logs_annotations.proto',
+      '$GOOGLE3/net/proto2/bridge/proto/message_set.proto',
+      '$GOOGLE3/net/proto2/proto/descriptor.proto',
+      '$GOOGLE3/privacy/private_membership/proto/private_membership.proto',
+      '$GOOGLE3/privacy/private_membership/rlwe/proto/private_membership_rlwe.proto',
+      '$GOOGLE3/storage/datapol/annotations/proto/semantic_annotations.proto',
+      '$GOOGLE3/storage/datapol/annotations/proto/retention_annotations.proto',
+      '$GOOGLE3/storage/datapol/annotations/proto/datapol_classification.proto',
+      '$GOOGLE3/third_party/rlwe/serialization.proto',
       '$GOOGLE3/wireless/android/enterprise/devicemanagement/proto/' +
           'dm_api.proto',
-      '$GOOGLE3/net/proto2/proto/descriptor.proto',
+      '$GOOGLE3/wireless/android/enterprise/devicemanagement/proto/' +
+          'omaha_settings.proto',
       ]
   proto_outputs = proto_env.CompileProtoBuf(proto_sources)
 
@@ -321,12 +340,14 @@ if env.Bit('has_device_management'):
                                '$GOOGLE3/third_party/protobuf/src')
   proto_env.Append(
       CCFLAGS=[
+          '/wd4065',
           '/wd4100',
           '/wd4125',
           '/wd4127',
           '/wd4146',
           '/wd4242',
           '/wd4244',
+          '/wd4267',
           '/wd4309',
           '/wd4548',
           '/wd4577',
@@ -337,7 +358,6 @@ if env.Bit('has_device_management'):
           '/wd4996',
           ],
       CPPPATH=[
-          '$GOOGLE3',
           protobuf_src_dir,
           '$TARGET_ROOT/proto_files',
       ],
@@ -415,6 +435,8 @@ gd_inputs = [
     'package.cc',
     'package_cache.cc',
     'ping_event_cancel.cc',
+    'policy_status.cc',
+    'policy_status_value.cc',
     'process_launcher.cc',
     'resource_manager.cc',
     'update3web.cc',
@@ -451,7 +473,6 @@ for omaha_version_info in env['omaha_versions_info']:
 
   temp_env.Append(
       CPPPATH = [
-          '$MAIN_DIR/third_party/breakpad/src/',
           '$OBJ_ROOT',
           ],
 
@@ -485,7 +506,6 @@ for omaha_version_info in env['omaha_versions_info']:
           'delayimp.lib',
           'imagehlp.lib',
           'iphlpapi.lib',
-          'msi.lib',
           'msimg32.lib',
           'mstask.lib',
           'netapi32.lib',
@@ -567,7 +587,7 @@ for omaha_version_info in env['omaha_versions_info']:
       source=inputs,
   )
 
-  signed_dll = temp_env.DualSignedBinary(
+  signed_dll = temp_env.SignedBinary(
       target=prefix + 'goopdate.dll',
       source=unsigned_dll,
   )
@@ -637,7 +657,7 @@ unsigned_test_installer = test_installer_env.ComponentProgram(
     prog_name='TestOmahaExeInstaller_unsigned',
     source=test_installer_inputs,
 )
-signed_test_installer = test_installer_env.DualSignedBinary(
+signed_test_installer = test_installer_env.SignedBinary(
     target='TestOmahaExeInstaller.exe',
     source=unsigned_test_installer,
 )

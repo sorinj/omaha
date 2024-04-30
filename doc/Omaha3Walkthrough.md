@@ -35,7 +35,7 @@ The Omaha Client always operates at user privilege levels and owns the UI of Oma
   * Setup - Create or update a permanent Omaha install, of either user or machine variety.
   * Install - Invoke the COM server to create a state machine object, fill it out with apps to be managed, and call a suitable function on it such as `checkForUpdate()`, `download()`, or `install()`.  From that point onwards, poll the state object as the COM server does the work for you, and update the UI as the states advance.
 
-In general, when referring to “the client”, we’re referring to the official Google Update client, which happens to live in the same executable as the COM Server; the role that the executable plays is decided simply by which command line is passed to it.  However, there are other clients that may access the COM server; some of them we own (the web browser plugins), and some we do not own (partner applications which access our COM APIs directly).  The server must stay as secure as possible, and sanitize all input.
+In general, when referring to “the client”, we’re referring to the official Google Update client, which happens to live in the same executable as the COM Server; the role that the executable plays is decided simply by which command line is passed to it.  However, there are other clients that may access the COM server; The server must stay as secure as possible, and sanitize all input.
 
 ## Example Code Flow ##
 
@@ -50,7 +50,6 @@ appname=Google%20Chrome&needsadmin=False&lang=en"
   * We check the machine to see if there’s already a user Omaha installed with a version newer than or equal to ours.  (If it’s equal to ours, we will do some supplementary checking to make sure that the installed copy is sane and working properly, and if not, we over-install.)  Let’s assume that there is no user Omaha installed.  We will create the direct directory in `AppData`, copy over the files, and then make entries in the Registry to do the following:
     * Register our COM servers
     * Create scheduled tasks to check for an update every five hours
-    * Expose our web browser plugins to IE/Firefox/Chrome/Safari/Opera
     * Store initial configuration/state for Omaha itself in the Registry
     * Register Omaha itself as an Omaha-managed application, so it can check for updates for itself
   * The client then starts a new copy of itself in its permanent installed location, modifying the command line from `/install` to `/handoff`.  Once again, the constant shell loads Goopdate and passes the command line along - this time, however, we’re using the constant shell in the newly-created permanent install of Omaha, rather than the one in the temp directory.
@@ -68,25 +67,26 @@ A crucial thing to pick up here is that, since one file (goopdate.dll) does many
 
 So, what files are actually in a permanent install of Omaha once it’s completed?
 
-| `GoogleUpdate.exe` | The Constant Shell.  Just takes the command line given to it and passes it to goopdate.dll; if necessary, it will validate that goopdate has an intact digital signature from Google. |
+| Filename | Description |
 |:-------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `GoogleCrashHandler.exe` | A copy of the constant shell, renamed for Omaha2 compatibility reasons.  Expected to always be started with /crashhandler.                                                            |
-| `GoogleUpdateBroker.exe`<br><code>GoogleUpdateOnDemand.exe</code> <table><thead><th> COM Forwarders.  Both of these are small EXEs whose sole purpose is to take their own command line, append a command line switch to the end, and pass it to the Constant Shell.       </th></thead><tbody>
-<tr><td> <code>goopdate.dll</code> </td><td> The central Omaha3 binary.                                                                                                                                                            </td></tr>
-<tr><td> <code>goopdateres_*.dll</code> </td><td> Resource-only DLLs, one per language, containing localized strings.  As part of its startup, Goopdate will read the “lang” extra-args parameter if one exists (or the Registry) and select a language to load. </td></tr>
-<tr><td> <code>npGoogleUpdate3.dll</code> </td><td> Our web browser plugin.  (It actually contains two plugins: ActiveX plugins for IE, and an NPAPI plugin for Firefox, Chrome, and other browsers that use that.)  Allows Javascript on selected subdomains of google.com to access and use the COM Server. </td></tr>
-<tr><td> <code>psmachine.dll</code><br><code>psuser.dll</code> </td><td> Custom marshaling stubs used by the COM Server.  Used in order to work around some Windows bugs that are triggered by having both Machine and User Omaha installed simultaneously.    </td></tr></tbody></table>
+| `GoogleUpdate.exe` | **The Constant Shell.**  Just takes the command line given to it and passes it to goopdate.dll; if necessary, it will validate that goopdate has an intact digital signature from Google. |
+| `GoogleCrashHandler.exe` | A copy of the constant shell, renamed for Omaha2 compatibility reasons.  Expected to always be started with /crashhandler. |
+| `GoogleUpdateBroker.exe`<br>`GoogleUpdateOnDemand.exe` | **COM Forwarders**.  Both of these are small EXEs whose sole purpose is to take their own command line, append a command line switch to the end, and pass it to the Constant Shell. 
+| `goopdate.dll` |  The central Omaha3 binary. |                                                                                             
+| `goopdateres_*.dll` | **Resource-only DLLs, one per language, containing localized strings**. As part of its startup, Goopdate will read the “lang” extra-args parameter if one exists (or the Registry) and select a language to load. |
+| `psmachine.dll`<br>`psuser.dll` | **Custom marshaling stubs used by the COM Server**. Used in order to work around some Windows bugs that are triggered by having both Machine and User Omaha installed simultaneously.|
 
-The directory tree typically looks like this:<br>
-<br>
-<pre><code>Google\<br>
-    Update\<br>
-        1.3.21.53\              The install location for the current version of Omaha.<br>
-            ... the files listed above ...<br>
-        Download\		Temp area for installers currently being downloaded.<br>
-        Install\		Temp area for installers that are verified and about to be launched.<br>
-        GoogleUpdate.exe	A copy of the the constant shell.  This will look into the registry for<br>
-				the most recently successfully installed version of Omaha, and<br>
-				use the goopdate.dll there.<br>
-</code></pre>
+
+The directory tree typically looks like this:
+```
+Google\
+    Update\
+        1.3.21.53\              The install location for the current version of Omaha.
+            ... the files listed above ...
+        Download\		Temp area for installers currently being downloaded.
+        Install\		Temp area for installers that are verified and about to be launched.
+        GoogleUpdate.exe	A copy of the the constant shell.  This will look into the registry for
+				the most recently successfully installed version of Omaha, and
+				use the goopdate.dll there.
+```
 At this point, the value of the Constant Shell becomes obvious - we can modify or change the location of goopdate.dll, without having to touch <code>GoogleUpdate.exe</code> in most cases.  This means that minor changes or bugfixes in Omaha can be pushed out, in the form of an update to goopdate.dll, without triggering a prompt from firewalls, virus scanners, or process whitelisters that may be in place on a machine.

@@ -61,12 +61,6 @@ TEST(CommandLineBuilder, BuildUnregServer) {
   EXPECT_STREQ(_T("/unregserver"), cmd_line);
 }
 
-TEST(CommandLineBuilder, BuildNetDiags) {
-  CommandLineBuilder builder(COMMANDLINE_MODE_NETDIAGS);
-  CString cmd_line = builder.GetCommandLineArgs();
-  EXPECT_STREQ(_T("/netdiags"), cmd_line);
-}
-
 TEST(CommandLineBuilder, BuildCrashNoFilename) {
   CommandLineBuilder builder(COMMANDLINE_MODE_CRASH);
   CString cmd_line = builder.GetCommandLineArgs();
@@ -186,6 +180,20 @@ TEST(CommandLineBuilder, BuildInstallWithExtraArgsSilent) {
                cmd_line);
 }
 
+TEST(CommandLineBuilder, BuildInstallWithExtraArgsSilentAndAlwaysLaunchCmd) {
+  CommandLineBuilder builder(COMMANDLINE_MODE_INSTALL);
+  builder.set_extra_args(_T("appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
+                         _T("appname=YouTubeUploader&needsadmin=False&")
+                         _T("lang=en"));
+  builder.set_is_silent_set(true);
+  builder.set_is_always_launch_cmd_set(true);
+  CString cmd_line = builder.GetCommandLineArgs();
+  EXPECT_STREQ(_T("/install \"appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
+               _T("appname=YouTubeUploader&needsadmin=False&lang=en\" /silent ")
+               _T("/alwayslaunchcmd"),
+               cmd_line);
+}
+
 TEST(CommandLineBuilder, BuildInstallWithExtraArgsSessionId) {
   CommandLineBuilder builder(COMMANDLINE_MODE_INSTALL);
   builder.set_extra_args(_T("appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
@@ -230,16 +238,16 @@ TEST(CommandLineBuilder, BuildUpdateWithSessionId) {
 // The /update builder works when not used with GoogleUpdate.exe.
 TEST(CommandLineBuilder, BuildUpdateAndGetCommandLineWithNonGoogleUpdateExe) {
   CommandLineBuilder builder(COMMANDLINE_MODE_UPDATE);
-  CString cmd_line = builder.GetCommandLine(_T("C:\\GoogleUpdateSetup_en.exe"));
-  EXPECT_STREQ(_T("\"C:\\GoogleUpdateSetup_en.exe\" /update"), cmd_line);
+  CString cmd_line = builder.GetCommandLine(_T("C:\\") MAIN_EXE_BASE_NAME _T("Setup_en.exe"));
+  EXPECT_STREQ(_T("\"C:\\") MAIN_EXE_BASE_NAME _T("Setup_en.exe\" /update"), cmd_line);
 }
 
 // The /update builder should not be used with GoogleUpdate.exe directly.
 TEST(CommandLineBuilder, BuildUpdateAndGetCommandLineWithGoogleUpdateExe) {
   CommandLineBuilder builder(COMMANDLINE_MODE_UPDATE);
   ExpectAsserts expect_asserts;
-  CString cmd_line = builder.GetCommandLine(_T("C:\\GoogleUpdate.exe"));
-  EXPECT_STREQ(_T("\"C:\\GoogleUpdate.exe\" /update"), cmd_line);
+  CString cmd_line = builder.GetCommandLine(_T("C:\\") MAIN_EXE_BASE_NAME _T(".exe"));
+  EXPECT_STREQ(_T("\"C:\\") MAIN_EXE_BASE_NAME _T(".exe\" /update"), cmd_line);
 }
 
 TEST(CommandLineBuilder, BuildComServer) {
@@ -264,24 +272,6 @@ TEST(CommandLineBuilder, BuildCodeRedCheck) {
   CommandLineBuilder builder(COMMANDLINE_MODE_CODE_RED_CHECK);
   CString cmd_line = builder.GetCommandLineArgs();
   EXPECT_STREQ(_T("/cr"), cmd_line);
-}
-
-TEST(CommandLineBuilder, BuildWebPlugin) {
-  CommandLineBuilder builder(COMMANDLINE_MODE_WEBPLUGIN);
-  ExpectAsserts expect_asserts;
-  CString cmd_line = builder.GetCommandLineArgs();
-  EXPECT_STREQ(_T(""), cmd_line);
-}
-
-TEST(CommandLineBuilder, BuildWebPluginWithUrlArgsAndInstallSource) {
-  CommandLineBuilder builder(COMMANDLINE_MODE_WEBPLUGIN);
-  builder.set_webplugin_args(_T("piargs"));
-  builder.set_webplugin_url_domain(_T("http://www.google.com/"));
-  builder.set_install_source(_T("oneclick"));
-  CString cmd_line = builder.GetCommandLineArgs();
-  EXPECT_STREQ(_T("/pi \"http://www.google.com/\" \"piargs\"")
-               _T(" /installsource oneclick"),
-               cmd_line);
 }
 
 TEST(CommandLineBuilder, BuildRecover) {
@@ -411,6 +401,27 @@ TEST(CommandLineBuilder, BuildHandoffInstallWithExtraArgsSilentOffline) {
                cmd_line);
 }
 
+TEST(CommandLineBuilder, 
+     BuildHandoffInstallWithExtraArgsSilentAlwaysLaunchCmd) {
+  CommandLineBuilder builder(COMMANDLINE_MODE_HANDOFF_INSTALL);
+  builder.set_extra_args(_T("appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
+                         _T("appname=YouTubeUploader&needsadmin=False&")
+                         _T("lang=en"));
+  builder.set_install_source(_T("offline"));
+  builder.set_is_silent_set(true);
+  builder.set_is_always_launch_cmd_set(true);
+  EXPECT_SUCCEEDED(
+      builder.SetOfflineDirName(_T("{B851CC84-A5C4-4769-92C1-DC6B0BB368B4}")));
+
+  CString cmd_line = builder.GetCommandLineArgs();
+  EXPECT_STREQ(_T("/handoff \"appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
+               _T("appname=YouTubeUploader&needsadmin=False&lang=en\"")
+               _T(" /installsource offline")
+               _T(" /silent /alwayslaunchcmd")
+               _T(" /offlinedir \"{B851CC84-A5C4-4769-92C1-DC6B0BB368B4}\""),
+               cmd_line);
+}
+
 TEST(CommandLineBuilder, BuildHandoffWithAppArgsSilentOffline) {
   CommandLineBuilder builder(COMMANDLINE_MODE_HANDOFF_INSTALL);
   builder.set_extra_args(_T("appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
@@ -511,12 +522,6 @@ TEST(CommandLineBuilder, BuildHealthCheck) {
   CommandLineBuilder builder(COMMANDLINE_MODE_HEALTH_CHECK);
   CString cmd_line = builder.GetCommandLineArgs();
   EXPECT_STREQ(_T("/healthcheck"), cmd_line);
-}
-
-TEST(CommandLineBuilder, BuildRegisterMsiHelper) {
-  CommandLineBuilder builder(COMMANDLINE_MODE_REGISTER_MSI_HELPER);
-  CString cmd_line = builder.GetCommandLineArgs();
-  EXPECT_STREQ(_T("/registermsihelper"), cmd_line);
 }
 
 }  // namespace omaha

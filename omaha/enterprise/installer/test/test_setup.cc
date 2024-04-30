@@ -15,12 +15,12 @@
 //
 // Author: grt
 //
-// A dummy app installer that does nothing more than write error information to
+// An app installer that does nothing more than write error information to
 // the registry as per the Google Update Installer Result API and return 1.
 
 #include <windows.h>
 
-#define GOOGLE_UPDATE_KEY L"SOFTWARE\\Google\\Update"
+#define GOOGLE_UPDATE_KEY L"SOFTWARE\\" PATH_COMPANY_NAME_ANSI "\\Update"
 #define TEST_SETUP_APP_GUID L"{665BDD8E-F40C-4384-A9C6-CA3CD5665C83}"
 
 namespace {

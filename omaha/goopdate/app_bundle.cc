@@ -57,7 +57,7 @@ AppBundle::AppBundle(bool is_machine, Model* model)
   CORE_LOG(L3, (_T("[AppBundle::AppBundle][0x%p]"), this));
   app_bundle_state_.reset(new fsm::AppBundleStateInit);
 
-  VERIFY1(SUCCEEDED(GetGuid(&request_id_)));
+  VERIFY_SUCCEEDED(GetGuid(&request_id_));
 }
 
 AppBundle::~AppBundle() {
@@ -76,6 +76,10 @@ AppBundle::~AppBundle() {
   __mutexScope(model()->lock());
   for (size_t i = 0; i < apps_.size(); ++i) {
     delete apps_[i];
+  }
+
+  for (size_t i = 0; i < uninstalled_apps_.size(); ++i) {
+    delete uninstalled_apps_[i];
   }
 
   // If the thread running this AppBundle does not exit before the
@@ -206,13 +210,13 @@ void AppBundle::BuildPing(std::unique_ptr<Ping>* my_ping) {
 
   for (size_t i = 0; i != apps_.size(); ++i) {
     if (apps_[i]->is_eula_accepted()) {
-      ping->BuildRequest(apps_[i], false);
+      ping->BuildRequest(apps_[i]);
     }
   }
 
   for (size_t i = 0; i != uninstalled_apps_.size(); ++i) {
     if (uninstalled_apps_[i]->is_eula_accepted()) {
-      ping->BuildRequest(uninstalled_apps_[i], false);
+      ping->BuildRequest(uninstalled_apps_[i]);
     }
   }
 
@@ -248,30 +252,37 @@ HRESULT AppBundle::SendPingEventsAsync() {
 
   CAccessToken token;
   if (impersonation_token()) {
-    VERIFY1(SUCCEEDED(DuplicateTokenIntoCurrentProcess(::GetCurrentProcess(),
+    VERIFY_SUCCEEDED(DuplicateTokenIntoCurrentProcess(::GetCurrentProcess(),
                                                        impersonation_token(),
-                                                       &token)));
+                                                       &token));
   }
 
-  typedef StaticThreadPoolCallBack1<internal::SendPingEventsParameters> CB;
-  Gate send_ping_events_gate;
-  std::unique_ptr<CB> callback(new CB(&AppBundle::SendPingEvents,
-                          internal::SendPingEventsParameters(
-                              ping.get(),
-                              token.GetHandle(),
-                              &send_ping_events_gate)));
-  HRESULT hr = Goopdate::Instance().QueueUserWorkItem(callback.get(),
-                                                      COINIT_MULTITHREADED,
-                                                      WT_EXECUTELONGFUNCTION);
+  // We Lock the ATL Module here since we want the process to stick around
+  // until the newly created threadpool item below starts and also completes
+  // execution. The corresponding Unlock of the ATL Module is done at the end
+  // of the threadpool proc.
+  _pAtlModule->Lock();
+  ScopeGuard atl_module_unlock = MakeObjGuard(*_pAtlModule,
+                                              &CAtlModule::Unlock);
+
+  using Callback =
+    StaticThreadPoolCallBack1<internal::SendPingEventsParameters>;
+  HRESULT hr = Goopdate::Instance().QueueUserWorkItem(
+      std::make_unique<Callback>(
+            &AppBundle::SendPingEvents,
+            internal::SendPingEventsParameters(
+                ping.get(),
+                token.GetHandle())),
+            COINIT_MULTITHREADED,
+            WT_EXECUTELONGFUNCTION);
   if (FAILED(hr)) {
     CORE_LOG(LE, (_T("[QueueUserWorkItem failed][0x%x]"), hr));
     return hr;
   }
 
+  atl_module_unlock.Dismiss();
   ping.release();
   token.Detach();
-  callback.release();
-  VERIFY1(send_ping_events_gate.Wait(INFINITE));
 
   return S_OK;
 }
@@ -279,14 +290,11 @@ HRESULT AppBundle::SendPingEventsAsync() {
 void AppBundle::SendPingEvents(internal::SendPingEventsParameters params) {
   CORE_LOG(L3, (_T("[AppBundle::SendPingEvents]")));
 
-  _pAtlModule->Lock();
   ON_SCOPE_EXIT_OBJ(*_pAtlModule, &CAtlModule::Unlock);
 
   std::unique_ptr<Ping> ping(params.ping);
   scoped_handle impersonation_token(params.impersonation_token);
   scoped_impersonation impersonate_user(get(impersonation_token));
-
-  VERIFY1(params.send_ping_events_gate->Open());
 
   // TODO(Omaha): Add sample to metric_ping_succeeded_ms or
   // metric_ping_failed_ms based on the result of Send().
@@ -748,7 +756,7 @@ void AppBundle::CompleteAsyncCall() {
 
   ASSERT1(is_pending_non_blocking_call());
 
-  VERIFY1(SUCCEEDED(app_bundle_state_->CompleteAsyncCall(this)));
+  VERIFY_SUCCEEDED(app_bundle_state_->CompleteAsyncCall(this));
 
   user_work_item_ = NULL;
 }

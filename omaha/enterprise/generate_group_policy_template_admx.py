@@ -52,6 +52,8 @@ ADMX_ENVIRONMENT = '''
           displayName="$(string.Sup_GoogleUpdate1_3_33_5)" />
       <definition name="Sup_GoogleUpdate1_3_34_3"
           displayName="$(string.Sup_GoogleUpdate1_3_34_3)" />
+      <definition name="Sup_GoogleUpdate1_3_35_453"
+          displayName="$(string.Sup_GoogleUpdate1_3_35_453)" />
     </definitions>
   </supportedOn>
 '''
@@ -198,11 +200,29 @@ ADMX_POLICIES = r'''
         displayName="$(string.Pol_DefaultAllowInstallation)"
         explainText="$(string.Explain_DefaultAllowInstallation)"
         presentation="$(presentation.Pol_DefaultAllowInstallation)"
-        key="%(RootPolicyKey)s" valueName="InstallDefault">
+        key="%(RootPolicyKey)s">
       <parentCategory ref="Cat_Applications" />
       <supportedOn ref="Sup_GoogleUpdate1_2_145_5" />
-      <enabledValue><decimal value="1" /></enabledValue>
-      <disabledValue><decimal value="0" /></disabledValue>
+      <elements>
+        <enum id="Part_InstallPolicy" key="%(RootPolicyKey)s"
+            valueName="InstallDefault" required="true">
+          <item displayName="$(string.Name_InstallsEnabled)">
+            <value>
+              <decimal value="1" />
+            </value>
+          </item>
+          <item displayName="$(string.Name_InstallsEnabledMachineOnly)">
+            <value>
+              <decimal value="4" />
+            </value>
+          </item>
+          <item displayName="$(string.Name_InstallsDisabled)">
+            <value>
+              <decimal value="0" />
+            </value>
+          </item>
+        </enum>
+      </elements>
     </policy>
     <policy name="Pol_DefaultUpdatePolicy" class="Machine"
         displayName="$(string.Pol_DefaultUpdatePolicy)"
@@ -241,17 +261,48 @@ ADMX_POLICIES = r'''
   </policies>
 '''
 
+INSTALL_POLICY_FORCE_INSTALL_MACHINE = r'''
+          <item displayName="$(string.Name_ForceInstallsMachine)">
+            <value>
+              <decimal value="5" />
+            </value>
+          </item>'''
+
+INSTALL_POLICY_FORCE_INSTALL_USER = r'''
+          <item displayName="$(string.Name_ForceInstallsUser)">
+            <value>
+              <decimal value="6" />
+            </value>
+          </item>'''
+
 ADMX_APP_POLICY_TEMPLATE = '''\
     <policy name="Pol_AllowInstallation%(AppLegalId)s" class="Machine"
         displayName="$(string.Pol_AllowInstallation)"
         explainText="$(string.Explain_Install%(AppLegalId)s)"
         presentation="$(presentation.Pol_AllowInstallation)"
-        key="%(RootPolicyKey)s"
-        valueName="Install%(AppGuid)s">
+        key="%(RootPolicyKey)s">
       <parentCategory ref="Cat_%(AppLegalId)s" />
       <supportedOn ref="Sup_GoogleUpdate1_2_145_5" />
-      <enabledValue><decimal value="1" /></enabledValue>
-      <disabledValue><decimal value="0" /></disabledValue>
+      <elements>
+        <enum id="Part_InstallPolicy"
+             valueName="Install%(AppGuid)s" required="true">
+          <item displayName="$(string.Name_InstallsEnabled)">
+            <value>
+              <decimal value="1" />
+            </value>
+          </item>
+          <item displayName="$(string.Name_InstallsEnabledMachineOnly)">
+            <value>
+              <decimal value="4" />
+            </value>
+          </item>
+          <item displayName="$(string.Name_InstallsDisabled)">
+            <value>
+              <decimal value="0" />
+            </value>
+          </item>%(ForceInstalls)s
+        </enum>
+      </elements>
     </policy>
     <policy name="Pol_UpdatePolicy%(AppLegalId)s" class="Machine"
         displayName="$(string.Pol_UpdatePolicy)"
@@ -284,6 +335,18 @@ ADMX_APP_POLICY_TEMPLATE = '''\
             </value>
           </item>
         </enum>
+      </elements>
+    </policy>
+    <policy name="Pol_TargetChannel%(AppLegalId)s" class="Machine"
+        displayName="$(string.Pol_TargetChannel)"
+        explainText="$(string.Explain_TargetChannel%(AppLegalId)s)"
+        presentation="$(presentation.Pol_TargetChannel)"
+        key="%(RootPolicyKey)s">
+      <parentCategory ref="Cat_%(AppLegalId)s" />
+      <supportedOn ref="Sup_GoogleUpdate1_3_35_453" />
+      <elements>
+        <text id="Part_TargetChannel"
+            valueName="TargetChannel%(AppGuid)s" />
       </elements>
     </policy>
     <policy name="Pol_TargetVersionPrefix%(AppLegalId)s" class="Machine"
@@ -386,11 +449,19 @@ def GenerateGroupPolicyTemplateAdmx(apps):
 
     app_policy_list = []
     for app in apps:
-      app_name, app_guid, _, _ = app
+      app_name, app_guid, _, _, force_install_machine, force_install_user = app
+
+      force_installs = ''
+      if force_install_machine:
+        force_installs += INSTALL_POLICY_FORCE_INSTALL_MACHINE
+      if force_install_user:
+        force_installs += INSTALL_POLICY_FORCE_INSTALL_USER
+
       app_policy_list.append(ADMX_APP_POLICY_TEMPLATE % {
           'AppLegalId': _CreateLegalIdentifier(app_name),
           'AppGuid': app_guid,
           'RootPolicyKey': MAIN_POLICY_KEY,
+          'ForceInstalls': force_installs,
       })
 
     return ADMX_POLICIES % {
@@ -427,12 +498,24 @@ ADML_DEFAULT_ROLLBACK_DISCLAIMER = (
     'version should be used. When versions are downgraded to older '
     'versions, there could be incompatibilities.')
 
+FORCE_INSTALLS_MACHINE_EXPLAIN = (
+    'Force Installs (Machine-Wide): Allows Deploying %s to all machines where Google Update is pre-installed. Requires Google Update 1.3.36.82 or higher.\n\n'
+)
+FORCE_INSTALLS_USER_EXPLAIN = (
+    'Force Installs (Per-User): Allows Deploying %s on a Per-User basis to all machines where Google Update is pre-installed Per-User. Requires Google Update 1.3.36.82 or higher.\n\n'
+)
+
+ADML_DOMAIN_REQUIREMENT_EN = (
+    'This policy is available only on Windows instances that are joined to a '
+    'Microsoft&#x00AE; Active Directory&#x00AE; domain.')
+
 ADML_PREDEFINED_STRINGS_TABLE_EN = [
     ('Sup_GoogleUpdate1_2_145_5', 'At least Google Update 1.2.145.5'),
     ('Sup_GoogleUpdate1_3_21_81', 'At least Google Update 1.3.21.81'),
     ('Sup_GoogleUpdate1_3_26_0', 'At least Google Update 1.3.26.0'),
     ('Sup_GoogleUpdate1_3_33_5', 'At least Google Update 1.3.33.5'),
     ('Sup_GoogleUpdate1_3_34_3', 'At least Google Update 1.3.34.3'),
+    ('Sup_GoogleUpdate1_3_35_453', 'At least Google Update 1.3.35.453'),
     ('Cat_GoogleUpdate', 'Google Update'),
     ('Cat_Preferences', 'Preferences'),
     ('Cat_ProxyServer', 'Proxy Server'),
@@ -449,6 +532,7 @@ ADML_PREDEFINED_STRINGS_TABLE_EN = [
     ('Pol_AllowInstallation', 'Allow installation'),
     ('Pol_DefaultUpdatePolicy', 'Update policy override default'),
     ('Pol_UpdatePolicy', 'Update policy override'),
+    ('Pol_TargetChannel', 'Target Channel override'),
     ('Pol_TargetVersionPrefix', 'Target version prefix override'),
     ('Pol_RollbackToTargetVersion', 'Rollback to Target version'),
     ('Part_AutoUpdateCheckPeriod', 'Minutes between update checks'),
@@ -461,7 +545,15 @@ ADML_PREDEFINED_STRINGS_TABLE_EN = [
     ('Part_ProxyMode', 'Choose how to specify proxy server settings'),
     ('Part_ProxyServer', 'Address or URL of proxy server'),
     ('Part_ProxyPacUrl', 'URL to a proxy .pac file'),
+    ('Part_InstallPolicy', 'Policy'),
+    ('Name_InstallsEnabled', 'Always allow Installs (recommended)'),
+    ('Name_InstallsEnabledMachineOnly',
+     'Always allow Machine-Wide Installs, but not Per-User Installs.'),
+    ('Name_InstallsDisabled', 'Installs disabled'),
+    ('Name_ForceInstallsMachine', 'Force Installs (Machine-Wide)'),
+    ('Name_ForceInstallsUser', 'Force Installs (Per-User)'),
     ('Part_UpdatePolicy', 'Policy'),
+    ('Part_TargetChannel', 'Target Channel'),
     ('Part_TargetVersionPrefix', 'Target version prefix'),
     ('Name_UpdatesEnabled', 'Always allow updates (recommended)'),
     ('Name_ManualUpdatesOnly', 'Manual updates only'),
@@ -478,18 +570,25 @@ ADML_PREDEFINED_STRINGS_TABLE_EN = [
     ('Explain_Preferences', 'General policies for Google Update.'),
     ('Explain_AutoUpdateCheckPeriod',
      'Minimum number of minutes between automatic update checks.\n\n'
-     'Set the value to 0 if you want to disable all auto-update checks '
-     '(not recommended).'),
+     'Set this policy to the value 0 to disable all periodic network traffic '
+     'by Google Update. This is not recommended, as it prevents Google Update '
+     'itself from receiving stability and security updates.\n\nThe "Update '
+     'policy override default" and per-application "Update policy override" '
+     'settings should be used to manage application updates rather than this '
+     'setting.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_DownloadPreference',
      'If enabled, the Google Update server will attempt to provide '
-     'cache-friendly URLs for update payloads in its responses.'),
+     'cache-friendly URLs for update payloads in its responses.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_UpdateCheckSuppressedPeriod',
      'If this setting is enabled, update checks will be suppressed during '
      'each day starting from Hour:Minute for a period of Duration (in minutes).'
      ' Duration does not account for daylight savings time. So for instance, '
      'if the start time is 22:00, and with a duration of 480 minutes, the '
      'updates will be suppressed for 8 hours regardless of whether daylight '
-     'savings time changes happen in between.'),
+     'savings time changes happen in between.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_ProxyMode',
      'Allows you to specify the proxy server used by Google Update.\n\n'
      'If you choose to never use a proxy server and always connect directly, '
@@ -499,15 +598,18 @@ ADML_PREDEFINED_STRINGS_TABLE_EN = [
      'If you choose fixed server proxy mode, you can specify further options '
      'in \'Address or URL of proxy server\'.\n\n'
      'If you choose to use a .pac proxy script, you must specify the URL to '
-     'the script in \'URL to a proxy .pac file\'.'),
+     'the script in \'URL to a proxy .pac file\'.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_ProxyServer',
      'You can specify the URL of the proxy server here.\n\n'
      'This policy only takes effect if you have selected manual proxy settings '
-     'at \'Choose how to specify proxy server settings\'.'),
+     'at \'Choose how to specify proxy server settings\'.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_ProxyPacUrl',
      'You can specify a URL to a proxy .pac file here.\n\n'
      'This policy only takes effect if you have selected manual proxy settings '
-     'at \'Choose how to specify proxy server settings\'.'),
+     'at \'Choose how to specify proxy server settings\'.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_Applications', 'Policies for individual applications.\n\n'
      'An updated ADMX/ADML template will be required to support '
      'Google applications released in the future.'),
@@ -519,7 +621,8 @@ ADML_PREDEFINED_STRINGS_TABLE_EN = [
      'Only affects installation of Google software using Google Update/Google '
      'Installer. Cannot prevent running the application installer directly or '
      'installation of Google software that does not use Google Update/Google '
-     'Installer for installation.'),
+     'Installer for installation.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
     ('Explain_DefaultUpdatePolicy',
      'Specifies the default policy for software updates from Google.\n\n'
      'Can be overridden by the "Update policy override" for individual '
@@ -543,12 +646,13 @@ ADML_PREDEFINED_STRINGS_TABLE_EN = [
      'Update will continue to update itself while it is installed.\n\n'
      'WARNING: Disabing updates will also prevent updates of any new Google '
      'applications released in the future, possibly including dependencies for '
-     'future versions of installed applications.'),
+     'future versions of installed applications.\n\n'
+     '%s' % ADML_DOMAIN_REQUIREMENT_EN),
 ]
 
 ADML_PRESENTATIONS = '''\
       <presentation id="Pol_AutoUpdateCheckPeriod">
-        <decimalTextBox refId="Part_AutoUpdateCheckPeriod" defaultValue="1400"
+        <decimalTextBox refId="Part_AutoUpdateCheckPeriod" defaultValue="295"
             spinStep="60">Minutes between update checks</decimalTextBox>
       </presentation>
       <presentation id="Pol_UpdateCheckSuppressedPeriod">
@@ -580,16 +684,28 @@ ADML_PRESENTATIONS = '''\
           <defaultValue></defaultValue>
         </textBox>
       </presentation>
-      <presentation id="Pol_DefaultAllowInstallation" />
+      <presentation id="Pol_DefaultAllowInstallation">
+        <dropdownList refId="Part_InstallPolicy"
+            defaultItem="0">Policy</dropdownList>
+      </presentation>
       <presentation id="Pol_DefaultUpdatePolicy">
         <dropdownList refId="Part_UpdatePolicy"
             defaultItem="0">Policy</dropdownList>
       </presentation>
-      <presentation id="Pol_AllowInstallation" />
+      <presentation id="Pol_AllowInstallation">
+        <dropdownList refId="Part_InstallPolicy"
+            defaultItem="0">Policy</dropdownList>
+      </presentation>
       <presentation id="Pol_UpdatePolicy">
         <dropdownList refId="Part_UpdatePolicy"
             defaultItem="0">Policy</dropdownList>
-      </presentation>\
+      </presentation>
+      <presentation id="Pol_TargetChannel">
+        <textBox refId="Part_TargetChannel">
+          <label>Target Channel</label>
+          <defaultValue></defaultValue>
+        </textBox>
+      </presentation>
       <presentation id="Pol_TargetVersionPrefix">
         <textBox refId="Part_TargetVersionPrefix">
           <label>Target version prefix</label>
@@ -641,6 +757,14 @@ def GenerateGroupPolicyTemplateAdml(apps):
     if not rollback_disclaimer:
       rollback_disclaimer = ADML_DEFAULT_ROLLBACK_DISCLAIMER
 
+    force_install_machine = app[4]
+    force_install_user = app[5]
+    force_installs_explain = ''
+    if force_install_machine:
+      force_installs_explain += FORCE_INSTALLS_MACHINE_EXPLAIN % app_name
+    if force_install_user:
+      force_installs_explain += FORCE_INSTALLS_USER_EXPLAIN % app_name
+
     app_category = ('Cat_' + app_legal_id, app_name)
     string_definition_list.append(app_category)
 
@@ -649,7 +773,13 @@ def GenerateGroupPolicyTemplateAdml(apps):
         'Specifies whether %s can be installed using Google Update/Google '
         'Installer.\n\n'
         'If this policy is not configured, %s can be installed as specified '
-        'by "Allow installation default".' % (app_name, app_name))
+        'by "Allow installation default".\n\n'
+        '%s'
+        '%s' % (app_name,
+                app_name,
+                force_installs_explain,
+                ADML_DOMAIN_REQUIREMENT_EN))
+
     string_definition_list.append(app_install_policy_explanation)
 
     app_auto_update_policy_explanation = (
@@ -670,9 +800,26 @@ def GenerateGroupPolicyTemplateAdml(apps):
         'If you select manual updates, you should periodically check for '
         'updates using the application\'s manual update mechanism if '
         'available. If you disable updates, you should periodically check '
-        'for updates and distribute them to users.%s' %
-        (app_name, app_additional_help_msg))
+        'for updates and distribute them to users.%s\n\n'
+        '%s' %
+        (app_name, app_additional_help_msg, ADML_DOMAIN_REQUIREMENT_EN))
     string_definition_list.append(app_auto_update_policy_explanation)
+
+    app_target_channel_explanation = (
+        'Explain_TargetChannel' + app_legal_id,
+        'Specifies which Channel %s should be updated to.\n\n'
+        'When this policy is enabled, the app will be updated to the Channel '
+        'with this policy value.\n\nSome examples:\n'
+        '1) Not configured: app will be updated to the latest version '
+        'available in the default Channel for the app.\n'
+        '2) Policy value is set to "stable": the app will be updated to the '
+        'latest stable version.\n'
+        '2) Policy value is set to "beta": the app will be updated to the '
+        'latest beta version.\n'
+        '2) Policy value is set to "dev": the app will be updated to the '
+        'latest dev version.\n'
+        '%s' % (app_name, ADML_DOMAIN_REQUIREMENT_EN))
+    string_definition_list.append(app_target_channel_explanation)
 
     app_target_version_prefix_explanation = (
         'Explain_TargetVersionPrefix' + app_legal_id,
@@ -686,22 +833,25 @@ def GenerateGroupPolicyTemplateAdml(apps):
         '3) Policy value is "55.2.": the app will be updated to any minor '
         'version of 55.2 (e.g., 55.2.34 or 55.2.2).\n'
         '4) Policy value is "55.24.34": the app will be updated to this '
-        'specific version only.' % app_name)
+        'specific version only.\n\n'
+        '%s' % (app_name, ADML_DOMAIN_REQUIREMENT_EN))
     string_definition_list.append(app_target_version_prefix_explanation)
 
     app_rollback_to_target_version_explanation = (
         'Explain_RollbackToTargetVersion' + app_legal_id,
-        'Specifies that Google Update should roll installations of %s back to '
-        'the version indicated by "Target version prefix override".\n\n'
-        'This policy setting has no effect unless "Target version prefix '
-        'override" is set.\n\n'
+        'Specifies that Google Update should roll installations of %s back if '
+        'the client has a higher version than that available.\n\n'
         'If this policy is not configured or is disabled, installs that have a '
-        'version higher than that specified by "Target version prefix '
-        'override" will be left as-is.\n\n'
+        'version higher than that available will be left as-is. This could be '
+        'the case if "Target channel override" is set to a Channel with a '
+        'lower version, if "Target version prefix override" matches a lower '
+        'version on the Channel, or if a user had installed a higher '
+        'version.\n\n'
         'If this policy is enabled, installs that have a version higher than '
-        'that specified by "Target version prefix override" will be downgraded '
-        'to the highest available version that matches the target version.\n\n'
-        '%s' % (app_name, rollback_disclaimer))
+        'that available will be downgraded to the highest available version, '
+        'respecting any configured target Channel and target version.\n\n'
+        '%s\n\n'
+        '%s' % (app_name, rollback_disclaimer, ADML_DOMAIN_REQUIREMENT_EN))
     string_definition_list.append(app_rollback_to_target_version_explanation)
 
   app_resource_strings = []
@@ -766,13 +916,18 @@ def WriteGroupPolicyTemplateAdml(target_path, apps):
 # Run a unit test when the module is run directly.
 if __name__ == '__main__':
   TEST_APPS = [
-      ('Google Test Foo', '{D6B08267-B440-4c85-9F79-E195E80D9937}',
+      ('Google Test Foo',
+       '{D6B08267-B440-4c85-9F79-E195E80D9937}',
        ' Check http://www.google.com/test_foo/.',
-       'Disclaimer'),
+       'Disclaimer',
+       True,
+       True),
       (u'Google User Test Foo\u00a9\u00ae\u2122',
        '{104844D6-7DDA-460b-89F0-FBF8AFDD0A67}',
        ' Check http://www.google.com/user_test_foo/.',
-       ''),
+       '',
+       False,
+       True),
   ]
   module_dir = os.path.abspath(os.path.dirname(__file__))
   gold_path = os.path.join(module_dir, 'test_gold.admx')

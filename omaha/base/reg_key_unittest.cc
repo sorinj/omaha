@@ -16,13 +16,14 @@
 #include "omaha/base/reg_key.h"
 
 #include "omaha/base/debug.h"
-#include "omaha/base/utils.h"
 #include "omaha/base/dynamic_link_kernel32.h"
+#include "omaha/base/user_info.h"
+#include "omaha/base/utils.h"
 #include "omaha/testing/unit_test.h"
 
 namespace omaha {
 
-#define kStTestRkeyRelativeBase   _T("Software\\") SHORT_COMPANY_NAME _T("\\") PRODUCT_NAME _T("\\UnitTest")
+#define kStTestRkeyRelativeBase   _T("Software\\") PATH_COMPANY_NAME _T("\\") PRODUCT_NAME _T("\\UnitTest")
 #define kStTestRkeyBase   _T("HKCU\\") kStTestRkeyRelativeBase
 #define kStRkey1Name      _T("TEST")
 #define kStRkey1          kStTestRkeyBase _T("\\") kStRkey1Name
@@ -76,7 +77,7 @@ namespace omaha {
 // Test the private member functions of RegKey
 class RegKeyTestClass : public testing::Test {
  protected:
-  static const HKEY GetHKey(const RegKey& reg) {
+  static HKEY GetHKey(const RegKey& reg) {
     return reg.h_key_;
   }
 
@@ -1018,6 +1019,64 @@ TEST_F(RegKeyCleanupTestKeyTest, DeleteKey_ParentKeyDoesNotExist_Recursively) {
 
   EXPECT_EQ(S_FALSE, RegKey::DeleteKey(kStRkey1Subkey, true));
   EXPECT_FALSE(RegKey::HasKey(kStRkey1Subkey));
+}
+
+TEST_F(RegKeyCleanupTestKeyTest, DeleteLinkNotTarget) {
+  // Create a target key with string and DWORD values.
+  const CString target_path = kStRkey1 _T("\\LinkTarget");
+  ASSERT_SUCCEEDED(
+      RegKey::SetValue(target_path, _T("TargetString"), _T("Hello")));
+  ASSERT_SUCCEEDED(
+      RegKey::SetValue(target_path, _T("TargetDWORD"), static_cast<DWORD>(1)));
+
+  // Create a source registry link to the above target key.
+  const CString source_path = kStRkey1 _T("\\LinkSource");
+  {
+    RegKey link;
+    EXPECT_SUCCEEDED(link.Create(source_path,
+                                 nullptr,
+                                 REG_OPTION_CREATE_LINK |
+                                     REG_OPTION_NON_VOLATILE,
+                                 KEY_WRITE));
+    CString user_sid;
+    ASSERT_SUCCEEDED(omaha::user_info::GetProcessUser(NULL, NULL, &user_sid));
+    const CString value = _T("\\Registry\\User\\") +
+                          user_sid +
+                          _T("\\") kRkey1 _T("\\LinkTarget");
+    ASSERT_SUCCEEDED(
+        link.SetValue(_T("SymbolicLinkValue"),
+                      reinterpret_cast<const byte*>(value.GetString()),
+                      value.GetLength() * sizeof(TCHAR),
+                      REG_LINK));
+  }
+
+  // Verify that reading from the source registry link actually reads the target
+  // values.
+  {
+    CString string_value;
+    ASSERT_SUCCEEDED(
+        RegKey::GetValue(source_path, _T("TargetString"), &string_value));
+    ASSERT_EQ(string_value, _T("Hello"));
+    DWORD value = 0;
+    ASSERT_SUCCEEDED(RegKey::GetValue(source_path, _T("TargetDWORD"), &value));
+    ASSERT_EQ(value, 1U);
+  }
+
+  // Now delete the link and ensure that the source registry link is no longer
+  // working, but the target key and values are still present.
+  {
+    ASSERT_SUCCEEDED(RegKey::DeleteKey(source_path));
+    CString string_value;
+    ASSERT_FAILED(
+        RegKey::GetValue(source_path, _T("TargetString"), &string_value));
+    ASSERT_SUCCEEDED(
+        RegKey::GetValue(target_path, _T("TargetString"), &string_value));
+    ASSERT_EQ(string_value, _T("Hello"));
+    DWORD value = 0;
+    ASSERT_FAILED(RegKey::GetValue(source_path, _T("TargetDWORD"), &value));
+    ASSERT_SUCCEEDED(RegKey::GetValue(target_path, _T("TargetDWORD"), &value));
+    ASSERT_EQ(value, 1U);
+  }
 }
 
 TEST_F(RegKeyCleanupTestKeyTest,

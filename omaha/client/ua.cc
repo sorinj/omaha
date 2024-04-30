@@ -99,39 +99,6 @@ void WriteUpdateAppsStartEvent(bool is_machine) {
   update_event.WriteEvent();
 }
 
-// If kRegValueIsMSIHelperRegistered is 0, the MSI helper is registered.
-HRESULT RegisterMSIHelperIfNeeded(bool is_machine) {
-  const TCHAR* key_name = is_machine ? MACHINE_REG_UPDATE : USER_REG_UPDATE;
-  DWORD is_registered(0);
-  VERIFY1(SUCCEEDED(RegKey::GetValue(key_name,
-                                     kRegValueIsMSIHelperRegistered,
-                                     &is_registered)));
-  if (is_registered) {
-    return S_OK;
-  }
-
-  CommandLineBuilder builder(COMMANDLINE_MODE_REGISTER_MSI_HELPER);
-  const CString cmd_line = builder.GetCommandLineArgs();
-  scoped_process process;
-  const HRESULT hr(goopdate_utils::StartGoogleUpdateWithArgs(is_machine,
-                                                             cmd_line,
-                                                             address(process)));
-  if (FAILED(hr)) {
-    SETUP_LOG(LE, (_T("[RegisterMsiHelper mode failed to start][%#x]"), hr));
-    return hr;
-  }
-
-  const int kMaxWaitForRegisterMsiProcessMs = 30000;
-  const DWORD result(::WaitForSingleObject(get(process),
-                     kMaxWaitForRegisterMsiProcessMs));
-  DWORD exit_code(static_cast<DWORD>(E_UNEXPECTED));
-  VERIFY1(result == WAIT_OBJECT_0 &&
-          ::GetExitCodeProcess(get(process), &exit_code) &&
-          SUCCEEDED(exit_code));
-
-  return exit_code;
-}
-
 // Ensures there is only one instance of /ua per session per Omaha instance.
 bool EnsureSingleUAProcess(bool is_machine,
                            std::unique_ptr<ProgramInstance>* instance) {
@@ -187,7 +154,7 @@ bool ShouldCheckForUpdates(bool is_machine) {
 
   bool should_check_for_updates = false;
 
-  if (ConfigManager::AreUpdatesSuppressedNow()) {
+  if (ConfigManager::Instance()->AreUpdatesSuppressedNow()) {
     should_check_for_updates = false;
   } else if (time_since_last_check < update_interval) {
     // Too soon.
@@ -211,8 +178,8 @@ bool ShouldCheckForUpdates(bool is_machine) {
     should_check_for_updates = true;
   }
 
-  CORE_LOG(L3, (_T("[ShouldCheckForUpdates returned %d][%u]"),
-                should_check_for_updates, is_period_overridden));
+  OPT_LOG(L3, (_T("[ShouldCheckForUpdates returned %d][%u]"),
+               should_check_for_updates, is_period_overridden));
   return should_check_for_updates;
 }
 
@@ -254,17 +221,15 @@ HRESULT UpdateApps(bool is_machine,
     return GOOPDATE_E_UA_ALREADY_RUNNING;
   }
 
-  VERIFY1(SUCCEEDED(ConfigManager::Instance()->SetLastStartedAU(is_machine)));
-
-  VERIFY1(SUCCEEDED(RegisterMSIHelperIfNeeded(is_machine)));
+  VERIFY_SUCCEEDED(ConfigManager::Instance()->SetLastStartedAU(is_machine));
 
   if (ConfigManager::Instance()->CanUseNetwork(is_machine)) {
-    VERIFY1(SUCCEEDED(Ping::SendPersistedPings(is_machine)));
+    VERIFY_SUCCEEDED(Ping::SendPersistedPings(is_machine));
   }
 
   // Generate a session ID for network accesses.
   CString session_id;
-  VERIFY1(SUCCEEDED(GetGuid(&session_id)));
+  VERIFY_SUCCEEDED(GetGuid(&session_id));
 
   // A tentative uninstall check is done here. There are stronger checks,
   // protected by locks, which are done by Setup.
@@ -281,6 +246,25 @@ HRESULT UpdateApps(bool is_machine,
     return goopdate_utils::LaunchUninstallProcess(is_machine);
   }
 
+  // We first install any apps that need to be force-installed according to
+  // policy set by a domain administrator.
+  HRESULT hr = InstallForceInstallApps(is_machine,
+                                       is_interactive,
+                                       install_source,
+                                       display_language,
+                                       session_id,
+                                       has_ui_been_displayed);
+  if (FAILED(hr)) {
+    CORE_LOG(LW, (_T("[InstallForceInstallApps failed][%#x]"), hr));
+  }
+
+  // InstallForceInstallApps creates a BundleAtlModule instance on the stack, so
+  // we reset the _pAtlModule to allow for a fresh ATL module for UpdateAllApps.
+  _pAtlModule = NULL;
+
+  // Generate a new session ID for UpdateAllApps.
+  VERIFY_SUCCEEDED(GetGuid(&session_id));
+
   const bool should_check_for_updates = ShouldCheckForUpdates(is_machine);
   if (!(is_on_demand || should_check_for_updates)) {
     OPT_LOG(L1, (_T("[Update check not needed at this time]")));
@@ -295,14 +279,14 @@ HRESULT UpdateApps(bool is_machine,
     ::Sleep(au_jitter_ms);
   }
 
-  HRESULT hr = UpdateAllApps(is_machine,
-                             is_interactive,
-                             install_source,
-                             display_language,
-                             session_id,
-                             has_ui_been_displayed);
+  hr = UpdateAllApps(is_machine,
+                     is_interactive,
+                     install_source,
+                     display_language,
+                     session_id,
+                     has_ui_been_displayed);
   if (FAILED(hr)) {
-    CORE_LOG(LW, (_T("[UpdateAllApps failed][0x%08x]"), hr));
+    OPT_LOG(LW, (_T("[UpdateAllApps failed][0x%08x]"), hr));
   }
   return hr;
 }

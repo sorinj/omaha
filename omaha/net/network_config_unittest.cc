@@ -23,6 +23,9 @@
 #include "omaha/base/reg_key.h"
 #include "omaha/base/utils.h"
 #include "omaha/base/vistautil.h"
+#include "omaha/common/config_manager.h"
+#include "omaha/common/const_group_policy.h"
+#include "omaha/goopdate/dm_messages.h"
 #include "omaha/net/http_client.h"
 #include "omaha/net/network_config.h"
 #include "omaha/testing/unit_test.h"
@@ -66,15 +69,6 @@ TEST_F(NetworkConfigTest, GetAccessType) {
   config.proxy = _T("foo");
   EXPECT_EQ(NetworkConfig::GetAccessType(config),
             WINHTTP_ACCESS_TYPE_NAMED_PROXY);
-}
-
-TEST_F(NetworkConfigTest, JoinStrings) {
-  EXPECT_STREQ(NetworkConfig::JoinStrings(NULL, NULL, NULL), _T(""));
-
-  CString result;
-  EXPECT_STREQ(NetworkConfig::JoinStrings(NULL, NULL, _T("-")), _T("-"));
-  EXPECT_STREQ(NetworkConfig::JoinStrings(_T("foo"), _T("bar"), _T("-")),
-                                          _T("foo-bar"));
 }
 
 TEST_F(NetworkConfigTest, GetUserAgentTest) {
@@ -190,7 +184,9 @@ TEST_F(NetworkConfigTest, ConfigurationOverride) {
   EXPECT_EQ(E_FAIL, network_config->GetConfigurationOverride(&actual));
 }
 
-TEST_F(NetworkConfigTest, GetProxyForUrlLocal) {
+// This test fails on and after Win 11 because ::InternetGetProxyInfo() is
+// no longer supported.
+TEST_F(NetworkConfigTest, DISABLED_GetProxyForUrlLocal) {
   CString pac_file_path = app_util::GetModuleDirectory(NULL);
   ASSERT_FALSE(pac_file_path.IsEmpty());
   pac_file_path.Append(_T("\\unittest_support\\localproxytest.pac"));
@@ -235,5 +231,87 @@ TEST_F(NetworkConfigTest, ToString) {
   EXPECT_STREQ(expected_tostring, NetworkConfig::ToString(config));
 }
 
-}  // namespace omaha
+// This class is parameterized for Domain, Device Management, and
+// CloudPolicyOverridesPlatformPolicy using
+// ::testing::TestWithParam<std::tuple<bool, bool, bool>>. The first parameter
+// is the bool for Domain, the second the bool for DM (Device Management), and
+// the third the bool for CloudPolicyOverridesPlatformPolicy.
+class NetworkConfigPolicyTest :
+    public ::testing::TestWithParam<std::tuple<bool, bool, bool>> {
+ protected:
+  virtual void SetUp() {
+    EXPECT_SUCCEEDED(RegKey::SetValue(MACHINE_REG_UPDATE_DEV,
+                                      kRegValueIsEnrolledToDomain,
+                                      IsDomain() ? 1UL : 0UL));
+    if (IsDomain()) {
+      SetPolicyString(kRegValueProxyMode, kProxyModeAutoDetect);
+    }
 
+    if (IsCloudPolicyOverridesPlatformPolicy()) {
+      SetPolicy(kRegValueCloudPolicyOverridesPlatformPolicy, 1UL);
+    }
+
+    // Delete the ConfigManager instance so it is recreated, since the registry
+    // entries above need to be accounted for within the ConfigManager
+    // constructor.
+    ConfigManager::DeleteInstance();
+
+    if (IsDM()) {
+      CachedOmahaPolicy info;
+      info.is_managed = true;
+      info.is_initialized = true;
+      info.proxy_mode = kProxyModePacScript;
+      info.proxy_pac_url = _T("https://PS/");
+      ConfigManager::Instance()->SetOmahaDMPolicies(info);
+    }
+  }
+
+  virtual void TearDown() {
+    ConfigManager::Instance()->SetOmahaDMPolicies(CachedOmahaPolicy());
+    RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
+    EXPECT_SUCCEEDED(RegKey::DeleteValue(MACHINE_REG_UPDATE_DEV,
+                                         kRegValueIsEnrolledToDomain));
+    NetworkConfigManager::DeleteInstance();
+  }
+
+  bool IsDomain() {
+    return std::get<0>(GetParam());
+  }
+
+  bool IsDM() {
+    return std::get<1>(GetParam());
+  }
+
+  bool IsCloudPolicyOverridesPlatformPolicy() {
+    return IsDomain() && std::get<2>(GetParam());
+  }
+
+  bool IsDomainPredominant() {
+    return IsDomain() && (!IsCloudPolicyOverridesPlatformPolicy() || !IsDM());
+  }
+};
+
+INSTANTIATE_TEST_CASE_P(IsDomainIsDMIsCloudPolicyOverridesPlatformPolicy,
+                        NetworkConfigPolicyTest,
+                        ::testing::Combine(::testing::Bool(),
+                                           ::testing::Bool(),
+                                           ::testing::Bool()));
+
+TEST_P(NetworkConfigPolicyTest, ProxyConfig) {
+  NetworkConfig* network_config = NULL;
+  ASSERT_HRESULT_SUCCEEDED(
+      NetworkConfigManager::Instance().GetUserNetworkConfig(&network_config));
+
+  std::vector<ProxyConfig> proxy_configurations;
+
+  // Detect the configurations.
+  ASSERT_HRESULT_SUCCEEDED(network_config->Detect());
+  network_config->GetConfigurations().swap(proxy_configurations);
+  if (IsDomainPredominant()) {
+    EXPECT_TRUE(proxy_configurations[0].auto_detect);
+  } else if (IsDM()) {
+    EXPECT_STREQ(_T("https://PS/"), proxy_configurations[0].auto_config_url);
+  }
+}
+
+}  // namespace omaha

@@ -77,10 +77,6 @@ HRESULT GoopdateCommandLineValidator::Setup() {
   SafeCStringFormat(&cmd_line, _T("/%s"), kCmdUnregServer);
   CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnUnregServer);
 
-  // gu.exe /netdiags
-  SafeCStringFormat(&cmd_line, _T("/%s"), kCmdLineNetDiags);
-  CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnNetDiags);
-
   // gu.exe /crash
   SafeCStringFormat(&cmd_line, _T("/%s"), kCmdLineCrash);
   CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnCrash);
@@ -96,15 +92,16 @@ HRESULT GoopdateCommandLineValidator::Setup() {
   CreateScenario(kCmdLineOnDemand, &GoopdateCommandLineValidator::OnDemand);
 
   // gu.exe /install <extraargs> [/appargs <appargs> [/installsource source
-  //        [/silent [/eularequired [/oem [/installelevated [/sessionid <sid>
-  //        [/enterprise
+  //        [/silent [/alwayslaunchcmd [/eularequired [/oem [/installelevated
+  //        [/sessionid <sid> [/enterprise
   SafeCStringFormat(
-      &cmd_line, _T("/%s extra [/%s appargs [/%s src [/%s [/%s [/%s [/%s ")
+      &cmd_line, _T("/%s extra [/%s appargs [/%s src [/%s [/%s [/%s [/%s [/%s ")
                  _T("[/%s sid [/%s"),
                  kCmdLineInstall,
                  kCmdLineAppArgs,
                  kCmdLineInstallSource,
                  kCmdLineSilent,
+                 kCmdLineAlwaysLaunchCmd,
                  kCmdLineEulaRequired,
                  kCmdLineOem,
                  kCmdLineInstallElevated,
@@ -118,15 +115,16 @@ HRESULT GoopdateCommandLineValidator::Setup() {
   CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnUpdate);
 
   // gu.exe /handoff <extraargs> [/appargs <appargs> [/installsource source
-  //        [/silent [/eularequired [/offlineinstall [/offlinedir <dir>
-  //        [/sessionid <sid> [/enterprise
+  //        [/silent [/alwayslaunchcmd [/eularequired [/offlineinstall
+  //        [/offlinedir <dir> [/sessionid <sid> [/enterprise
   SafeCStringFormat(
-      &cmd_line, _T("/%s extra [/%s appargs [/%s src [/%s [/%s [/%s [/%s dir ")
-                 _T("[/%s sid [/%s"),
+      &cmd_line, _T("/%s extra [/%s appargs [/%s src [/%s [/%s [/%s [/%s ")
+                 _T("[/%s dir [/%s sid [/%s"),
                  kCmdLineAppHandoffInstall,
                  kCmdLineAppArgs,
                  kCmdLineInstallSource,
                  kCmdLineSilent,
+                 kCmdLineAlwaysLaunchCmd,
                  kCmdLineEulaRequired,
                  kCmdLineLegacyOfflineInstall,
                  kCmdLineOfflineDir,
@@ -156,12 +154,6 @@ HRESULT GoopdateCommandLineValidator::Setup() {
                     kCmdLineMachine);
   CreateScenario(cmd_line,
                  &GoopdateCommandLineValidator::OnReportCrashInteractive);
-
-  // gu.exe /pi <domainurl> <args> /installsource <oneclick|update3web>
-  SafeCStringFormat(&cmd_line, _T("/%s domainurl args /%s src"),
-                    kCmdLineWebPlugin,
-                    kCmdLineInstallSource);
-  CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnWebPlugin);
 
   // gu.exe /cr
   SafeCStringFormat(&cmd_line, _T("/%s"), kCmdLineCodeRedCheck);
@@ -197,10 +189,6 @@ HRESULT GoopdateCommandLineValidator::Setup() {
   // gu.exe /healthcheck
   SafeCStringFormat(&cmd_line, _T("/%s"), kCmdLineHealthCheck);
   CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnHealthCheck);
-
-  // gu.exe /registermsihelper
-  SafeCStringFormat(&cmd_line, _T("/%s"), kCmdLineRegisterMsiHelper);
-  CreateScenario(cmd_line, &GoopdateCommandLineValidator::OnRegisterMsiHelper);
 
   return S_OK;
 }
@@ -313,11 +301,6 @@ HRESULT GoopdateCommandLineValidator::OnUnregServer() {
   return S_OK;
 }
 
-HRESULT GoopdateCommandLineValidator::OnNetDiags() {
-  args_->mode = COMMANDLINE_MODE_NETDIAGS;
-  return S_OK;
-}
-
 HRESULT GoopdateCommandLineValidator::OnCrash() {
   args_->mode = COMMANDLINE_MODE_CRASH;
   return S_OK;
@@ -347,6 +330,7 @@ HRESULT GoopdateCommandLineValidator::OnInstall() {
                                   0,
                                   &args_->session_id);
   args_->is_silent_set = parser_->HasSwitch(kCmdLineSilent);
+  args_->is_always_launch_cmd_set = parser_->HasSwitch(kCmdLineAlwaysLaunchCmd);
   args_->is_enterprise_set = parser_->HasSwitch(kCmdLineEnterprise);
   args_->is_eula_required_set = parser_->HasSwitch(kCmdLineEulaRequired);
   args_->is_oem_set = parser_->HasSwitch(kCmdLineOem);
@@ -371,6 +355,7 @@ HRESULT GoopdateCommandLineValidator::OnInstallHandoffWorker() {
                                   0,
                                   &args_->session_id);
   args_->is_silent_set = parser_->HasSwitch(kCmdLineSilent);
+  args_->is_always_launch_cmd_set = parser_->HasSwitch(kCmdLineAlwaysLaunchCmd);
   args_->is_enterprise_set = parser_->HasSwitch(kCmdLineEnterprise);
   args_->is_eula_required_set = parser_->HasSwitch(kCmdLineEulaRequired);
   args_->is_offline_set = parser_->HasSwitch(kCmdLineLegacyOfflineInstall) ||
@@ -418,45 +403,6 @@ HRESULT GoopdateCommandLineValidator::OnReportCrashInteractive() {
   return parser_->GetSwitchArgumentValue(kCmdLineInteractive,
                                          0,
                                          &args_->crash_filename);
-}
-
-HRESULT GoopdateCommandLineValidator::OnWebPlugin() {
-  HRESULT hr = parser_->GetSwitchArgumentValue(kCmdLineInstallSource,
-                                               0,
-                                               &args_->install_source);
-  if (FAILED(hr)) {
-    return hr;
-  }
-  // Validate install_source value.
-  args_->install_source.MakeLower();
-  if ((args_->install_source.Compare(kCmdLineInstallSource_OneClick) != 0) &&
-      (args_->install_source.Compare(kCmdLineInstallSource_Update3Web) != 0)) {
-    args_->install_source.Empty();
-    return E_INVALIDARG;
-  }
-
-  args_->mode = COMMANDLINE_MODE_WEBPLUGIN;
-
-  CString urldomain;
-  hr = parser_->GetSwitchArgumentValue(kCmdLineWebPlugin,
-                                       0,
-                                       &urldomain);
-  if (FAILED(hr)) {
-    return hr;
-  }
-  hr = StringUnescape(urldomain, &args_->webplugin_urldomain);
-  if (FAILED(hr)) {
-    return hr;
-  }
-
-  CString webplugin_args;
-  hr = parser_->GetSwitchArgumentValue(kCmdLineWebPlugin,
-                                       1,
-                                       &webplugin_args);
-  if (FAILED(hr)) {
-    return hr;
-  }
-  return StringUnescape(webplugin_args, &args_->webplugin_args);
 }
 
 HRESULT GoopdateCommandLineValidator::OnCodeRed() {
@@ -508,11 +454,6 @@ HRESULT GoopdateCommandLineValidator::OnPing() {
 
 HRESULT GoopdateCommandLineValidator::OnHealthCheck() {
   args_->mode = COMMANDLINE_MODE_HEALTH_CHECK;
-  return S_OK;
-}
-
-HRESULT GoopdateCommandLineValidator::OnRegisterMsiHelper() {
-  args_->mode = COMMANDLINE_MODE_REGISTER_MSI_HELPER;
   return S_OK;
 }
 

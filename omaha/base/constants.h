@@ -46,13 +46,20 @@ namespace omaha {
 
 // Full company name.
 // FULL_COMPANY_NAME == "Google LLC"
-const TCHAR* const kFullCompanyName = _T(FULL_COMPANY_NAME_ANSI);
+#define FULL_COMPANY_NAME _T(FULL_COMPANY_NAME_ANSI)
+const TCHAR* const kFullCompanyName = FULL_COMPANY_NAME;
 
-// Short company name (for use in paths and messages and to combine with product
-// name). Does not include "Inc." and similar formal parts of the company name.
+// Short company name (for use in messages and to combine with product name).
+// Does not include "Inc." and similar formal parts of the company name.
+// If the company name can be abbreviated, it will be here.
 // SHORT_COMPANY_NAME == "Google"
 #define SHORT_COMPANY_NAME _T(SHORT_COMPANY_NAME_ANSI)
 const TCHAR* const kShortCompanyName = SHORT_COMPANY_NAME;
+
+// The company name to use in file and registry paths.
+// PATH_COMPANY_NAME == "Google"
+#define PATH_COMPANY_NAME _T(PATH_COMPANY_NAME_ANSI)
+const TCHAR* const kPathCompanyName = PATH_COMPANY_NAME;
 
 // Product name.
 // PRODUCT_NAME == "Update"
@@ -113,8 +120,6 @@ const TCHAR* const kOmahaBrokerFileName        =
     MAIN_EXE_BASE_NAME _T("Broker.exe");
 const TCHAR* const kOmahaOnDemandFileName      =
     MAIN_EXE_BASE_NAME _T("OnDemand.exe");
-const TCHAR* const kOmahaWebPluginFileName      =
-    MAIN_EXE_BASE_NAME _T("WebPlugin.exe");
 const TCHAR* const kCrashHandlerFileName   = CRASH_HANDLER_NAME _T(".exe");
 const TCHAR* const kCrashHandler64FileName = CRASH_HANDLER_NAME _T("64.exe");
 const TCHAR* const kOmahaMetainstallerFileName =
@@ -130,15 +135,8 @@ const TCHAR* const kPSFileNameUser64   = _T("psuser_64.dll");
 // TODO(omaha): Replace the following literal in clickonce\build.scons.
 // '%s/GoogleUpdateSetup.exe'
 
-// These must be in sync with the WiX files.
-// TODO(omaha): Make these constants in main.scons and use them in the .wxs
-// files, kMsiUninstallKey, and elsewhere this GUID appears.
-const TCHAR* const kHelperInstallerName = MAIN_EXE_BASE_NAME _T("Helper.msi");
-const TCHAR* const kHelperInstallerProductGuid =
+const TCHAR* const kLegacyHelperInstallerGuid =
     _T("{A92DAB39-4E2C-4304-9AB6-BC44E68B55E2}");
-const TCHAR* const kHelperPatchName = MAIN_EXE_BASE_NAME _T("HelperPatch.msp");
-const TCHAR* const kHelperPatchGuid =
-    _T("{E0D0D2C9-5836-4023-AB1D-54EC3B90AD03}");
 
 // The value that is used in the run key.
 const TCHAR* const kRunValueName = kAppName;
@@ -183,9 +181,10 @@ const TCHAR* const kChromeAppId = CHROME_APP_ID;
 #define INSTALL_WORKING_DIR_NAME  _T("Install")
 
 // Directories relative to \Google
-#define OMAHA_REL_COMPANY_DIR SHORT_COMPANY_NAME
+#define OMAHA_REL_COMPANY_DIR PATH_COMPANY_NAME
 #define OMAHA_REL_CRASH_DIR OMAHA_REL_COMPANY_DIR _T("\\CrashReports")
 #define OMAHA_REL_POLICY_RESPONSES_DIR OMAHA_REL_COMPANY_DIR _T("\\Policies")
+#define OMAHA_REL_TEMP_DIR OMAHA_REL_COMPANY_DIR _T("\\Temp")
 
 // Directories relative to \Google\Update
 #define OMAHA_REL_GOOPDATE_INSTALL_DIR \
@@ -210,14 +209,14 @@ const TCHAR* const kChromeAppId = CHROME_APP_ID;
 #define USER_KEY_NAME _T("HKCU")
 #define USER_KEY USER_KEY_NAME _T("\\")
 #define USERS_KEY _T("HKU\\")
-#define COMPANY_MAIN_KEY _T("Software\\") SHORT_COMPANY_NAME _T("\\")
+#define COMPANY_MAIN_KEY _T("Software\\") PATH_COMPANY_NAME _T("\\")
 #define GOOPDATE_MAIN_KEY COMPANY_MAIN_KEY PRODUCT_NAME _T("\\")
 #define GOOPDATE_REG_RELATIVE_CLIENTS GOOPDATE_MAIN_KEY _T("Clients\\")
 #define GOOPDATE_REG_RELATIVE_CLIENT_STATE GOOPDATE_MAIN_KEY _T("ClientState\\")
 #define GOOPDATE_REG_RELATIVE_CLIENT_STATE_MEDIUM \
     GOOPDATE_MAIN_KEY _T("ClientStateMedium\\")
 #define COMPANY_POLICIES_MAIN_KEY \
-    _T("Software\\Policies\\") SHORT_COMPANY_NAME _T("\\")
+    _T("Software\\Policies\\") PATH_COMPANY_NAME _T("\\")
 #define GOOPDATE_POLICIES_RELATIVE COMPANY_POLICIES_MAIN_KEY \
     PRODUCT_NAME _T("\\")
 #define CLOUD_MANAGEMENT_POLICIES_RELATIVE COMPANY_POLICIES_MAIN_KEY \
@@ -247,15 +246,6 @@ const TCHAR* const kChromeAppId = CHROME_APP_ID;
 
 // Expands to HKEY_LOCAL_MACHINE\SOFTWARE\Google\UpdateDev
 #define MACHINE_REG_UPDATE_DEV MACHINE_KEY REG_UPDATE_DEV
-
-// Regular expressions for the servers allowed to use the Omaha plugins.
-const TCHAR* const kSiteLockPatternStrings[] = {
-  _T("^(gears)|(mail)|(tools)|(www)|(desktop)|(pack)|(chrome)|(drive)\\.google\\.com$"),  // NOLINT
-  _T("^www\\.google\\.(ad)|(bg)|(ca)|(cn)|(cz)|(de)|(es)|(fi)|(fr)|(gr)|(hr)|(hu)|(it)|(ki)|(kr)|(lt)|(lv)|(nl)|(no)|(pl)|(pt)|(ro)|(ru)|(sk)|(sg)|(sl)|(sr)|(vn)$"),  // NOLINT
-  _T("^www\\.google\\.co\\.(hu)|(id)|(il)|(it)|(jp)|(kr)|(th)|(uk)$"),
-  _T("^www\\.google\\.com\\.(ar)|(au)|(br)|(cn)|(et)|(gr)|(hr)|(ki)|(lv)|(om)|(pl)|(pt)|(ru)|(sg)|(sv)|(tr)|(vn)$"),  // NOLINT
-  _T("^(www\\.)?chrome\\.com$"),
-};
 
 //
 // Minimum compatible shell version.
@@ -292,6 +282,7 @@ const TCHAR* const kRegValueNamePingUrl             = _T("PingUrl");
 const TCHAR* const kRegValueNameCrashReportUrl      = _T("CrashReportUrl");
 const TCHAR* const kRegValueNameGetMoreInfoUrl      = _T("MoreInfoUrl");
 const TCHAR* const kRegValueNameUsageStatsReportUrl = _T("UsageStatsReportUrl");
+const TCHAR* const kRegValueNameAppLogoUrl          = _T("AppLogoUrl");
 const TCHAR* const kRegValueTestSource              = _T("TestSource");
 const TCHAR* const kRegValueAuCheckPeriodMs         = _T("AuCheckPeriodMs");
 const TCHAR* const kRegValueCrCheckPeriodMs         = _T("CrCheckPeriodMs");
@@ -300,12 +291,26 @@ const TCHAR* const kRegValueProxyHost               = _T("ProxyHost");
 const TCHAR* const kRegValueProxyPort               = _T("ProxyPort");
 const TCHAR* const kRegValueMID                     = _T("mid");
 
+const TCHAR* const kRegValueDisablePayloadAuthenticodeVerification =
+    _T("DisablePayloadAuthenticodeVerification");
+
+// File extensions that can be verified with an Authenticode signature.
+const TCHAR* const kAuthenticodeVerifiableExtensions[] = {
+  _T("exe"),  _T("msi"),    _T("dll"),  _T("sys"),  _T("cab"), _T("ocx"),
+  _T("xpi"),  _T("xap"),    _T("cat"),  _T("jar"),  _T("ps1"), _T("psm1"),
+  _T("psd1"), _T("ps1xml"), _T("psc1"), _T("acm "), _T("ax"),  _T("cpl"),
+  _T("drv"),  _T("efi"),    _T("mui"),  _T("scr"),  _T("sys"), _T("tsp")
+};
+
 #if defined(HAS_DEVICE_MANAGEMENT)
 const TCHAR* const kRegValueNameDeviceManagementUrl = _T("DeviceManagementUrl");
 #endif
 
 // The values below can be overriden in unofficial builds.
 const TCHAR* const kRegValueNameWindowsInstalling = _T("WindowsInstalling");
+
+// Allows Omaha to log to %ALLUSERSPROFILE%\Google\Update\Log\GoogleUpdate.log.
+const TCHAR* const kRegValueIsEnabledLogToFile    = _T("IsEnabledLogToFile");
 
 // Allows Omaha to log events in the Windows Event Log. This is
 // a DWORD value 0: Log nothing, 1: Log warnings and errors, 2: Log everything.
@@ -322,13 +327,6 @@ const TCHAR* const kRegValueLastCheckPeriodSec = _T("LastCheckPeriodSec");
 
 // Uses the production or the test cup keys.
 const TCHAR* const kRegValueCupKeys            = _T("TestKeys");
-
-// Allow a custom host pattern to be specified. For example,
-// "^https?://some_test_server\.google\.com/". For other examples, see
-// kSiteLockPatternStrings. The detailed regular expression syntax is documented
-// in the MSDN documentation for the CAtlRegExp class:
-// http://msdn.microsoft.com/en-us/library/k3zs4axe.aspx.
-const TCHAR* const kRegValueOneClickHostPattern = _T("OneClickHostPattern");
 
 // Disables executable verification for application commands.
 const TCHAR* const kRegValueSkipCommandVerification =
@@ -414,13 +412,6 @@ const TCHAR* const kDefaultCountryCode = _T("us");
 
 // the max length of the extra info we can store inside the install stubs.
 const int kExtraMaxLength = 64 * 1024;  // 64 KB
-
-#if defined(HAS_DEVICE_MANAGEMENT)
-
-// The maximum length of an enrollment token.
-const int kEnrollmentTokenMaxLength = 1024;
-
-#endif  // defined(HAS_DEVICE_MANAGEMENT)
 
 // Default brand code value when one is not specified.
 // This has been specifically assigned to Omaha.

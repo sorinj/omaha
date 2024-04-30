@@ -16,7 +16,6 @@
 #include "base/basictypes.h"
 #include "base/rand_util.h"
 #include "omaha/base/debug.h"
-#include "omaha/base/localization.h"
 #include "omaha/base/string.h"
 #include "omaha/base/time.h"
 #include "omaha/base/timer.h"
@@ -66,7 +65,8 @@ TEST(StringTest, UintToString) {
   ASSERT_STREQ(String_Uint64ToString(0x101fff, 16), L"101fff");
   ASSERT_STREQ(String_Uint64ToString(0x999999, 16), L"999999");
   ASSERT_STREQ(String_Uint64ToString(0x0, 16), L"0");
-  ASSERT_STREQ(String_Uint64ToString(0xffffffffffffffff, 16), L"ffffffffffffffff");
+  ASSERT_STREQ(String_Uint64ToString(0xffffffffffffffff, 16),
+               L"ffffffffffffffff");
 
   ASSERT_STREQ(String_Uint64ToString(01234, 8), L"1234");
   ASSERT_STREQ(String_Uint64ToString(0, 8), L"0");
@@ -181,29 +181,6 @@ TEST(StringTest, EndsWith) {
   ASSERT_FALSE(String_EndsWith(L"The quick brown fox", L"the brown foX", true));
 }
 
-TEST(StringTest, Unencode) {
-  // Normal, correct usage.
-  // char 0x25 is '%'
-  ASSERT_STREQ(Unencode(L"?q=moon+doggy_%25%5E%26"), L"?q=moon doggy_%^&");
-  ASSERT_STREQ(Unencode(L"%54%68%69%73+%69%73%09%61%20%74%65%73%74%0A"),
-               L"This is\ta test\n");
-  ASSERT_STREQ(Unencode(L"This+is%09a+test%0a"), L"This is\ta test\n");
-
-  // NULL char.
-  ASSERT_STREQ(Unencode(L"Terminated%00before+this"), L"Terminated");
-  ASSERT_STREQ(Unencode(L"invalid+%a%25"), L"invalid %a%");
-  ASSERT_STREQ(Unencode(L"invalid+%25%41%37"), L"invalid %A7");
-  ASSERT_STREQ(Unencode(L"not a symbol %RA"), L"not a symbol %RA");
-  ASSERT_STREQ(Unencode(L"%ag"), L"%ag");
-  ASSERT_STREQ(Unencode(L"dontdecode%dont"), L"dontdecode%dont");
-  ASSERT_STREQ(Unencode(L""), L"");
-  ASSERT_STREQ(Unencode(L"%1"), L"%1");
-  ASSERT_STREQ(Unencode(L"\x100"), L"\x100");
-  ASSERT_STREQ(Unencode(L"this is%20a%20wide%20char%20\x345"),
-               L"this is a wide char \x345");
-  ASSERT_STREQ(Unencode(L"a utf8 string %E7%BC%9c %E4%B8%8a = 2"),
-               L"a utf8 string \x7f1c \x4e0a = 2");
-}
 
 #if 0
 static const struct {
@@ -235,13 +212,6 @@ bool TestAnsiToWideString() {
   return true;
 }
 #endif
-
-TEST(StringTest, Show) {
-  ASSERT_STREQ(Show(0), _T("0"));
-  ASSERT_STREQ(Show(1), _T("1"));
-  ASSERT_STREQ(Show(-1), _T("-1"));
-}
-
 
 // Test international strings.
 TEST(StringTest, International) {
@@ -386,15 +356,6 @@ TEST(StringTest, International) {
     temp.ReleaseBuffer();
 
     ASSERT_STREQ(temp, true_lower);
-
-    // Make sure that the normal CString::Trim works the same as our fast one
-    CString trim_normal(tabs_by_lang[i]);
-    trim_normal.Trim();
-
-    CString trim_fast(tabs_by_lang[i]);
-    TrimCString(trim_fast);
-
-    ASSERT_STREQ(trim_normal, trim_fast);
   }
 }
 
@@ -480,142 +441,6 @@ TEST(StringTest, ReplaceCString) {
   }
 }
 
-TEST(StringTest, GetField) {
-  CString s(_T("<a>a</a><b>123</b><c>aa\ndd</c>"));
-
-  CString a(GetField (s, L"a"));
-  ASSERT_STREQ(a, L"a");
-
-  CString b(GetField (s, L"b"));
-  ASSERT_STREQ(b, L"123");
-
-  CString c(GetField (s, L"c"));
-  ASSERT_STREQ(c, L"aa\ndd");
-}
-
-TEST(StringTest, String_HasAlphabetLetters) {
-  ASSERT_TRUE(String_HasAlphabetLetters (L"abc"));
-  ASSERT_TRUE(String_HasAlphabetLetters (L"X"));
-  ASSERT_TRUE(String_HasAlphabetLetters (L" pie "));
-  ASSERT_FALSE(String_HasAlphabetLetters (L"1"));
-  ASSERT_FALSE(String_HasAlphabetLetters (L"0"));
-  ASSERT_FALSE(String_HasAlphabetLetters (L"010"));
-  ASSERT_FALSE(String_HasAlphabetLetters (L"314-159"));
-  ASSERT_TRUE(String_HasAlphabetLetters (L"pie0"));
-}
-
-TEST(StringTest, String_LargeIntToApproximateString) {
-  int power;
-  ASSERT_TRUE(String_LargeIntToApproximateString(10LL, true, &power) == _T("10") && power == 0);
-  ASSERT_TRUE(String_LargeIntToApproximateString(99LL, true, &power) == _T("99") && power == 0);
-  ASSERT_TRUE(String_LargeIntToApproximateString(990LL, true, &power) == _T("990") && power == 0);
-  ASSERT_TRUE(String_LargeIntToApproximateString(999LL, true, &power) == _T("999") && power == 0);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(1000LL, true, &power) == _T("1.0") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(1200LL, true, &power) == _T("1.2") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(7500LL, true, &power) == _T("7.5") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(9900LL, true, &power) == _T("9.9") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(10000LL, true, &power) == _T("10") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(11000LL, true, &power) == _T("11") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(987654LL, true, &power) == _T("987") && power == 1);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(1000000LL, true, &power) == _T("1.0") && power == 2);
-  ASSERT_TRUE(String_LargeIntToApproximateString(1300000LL, true, &power) == _T("1.3") && power == 2);
-  ASSERT_TRUE(String_LargeIntToApproximateString(987654321LL, true, &power) == _T("987") && power == 2);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(1000000000LL, true, &power) == _T("1.0") && power == 3);
-  ASSERT_TRUE(String_LargeIntToApproximateString(1999999999LL, true, &power) == _T("1.9") && power == 3);
-  ASSERT_TRUE(String_LargeIntToApproximateString(20000000000LL, true, &power) == _T("20") && power == 3);
-  ASSERT_TRUE(String_LargeIntToApproximateString(1000000000000LL, true, &power) == _T("1000") && power == 3);
-  ASSERT_TRUE(String_LargeIntToApproximateString(12345678901234LL, true, &power) == _T("12345") && power == 3);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(1023LL, false, &power) == _T("1023") && power == 0);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(1024LL, false, &power) == _T("1.0") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(1134LL, false, &power) == _T("1.1") && power == 1);
-  ASSERT_TRUE(String_LargeIntToApproximateString(10240LL, false, &power) == _T("10") && power == 1);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(5242880LL, false, &power) == _T("5.0") && power == 2);
-
-  ASSERT_TRUE(String_LargeIntToApproximateString(1073741824LL, false, &power) == _T("1.0") && power == 3);
-  ASSERT_TRUE(String_LargeIntToApproximateString(17179869184LL, false, &power) == _T("16") && power == 3);
-}
-
-TEST(StringTest, FindWholeWordMatch) {
-  // words with spaces before / after
-  ASSERT_EQ(0, FindWholeWordMatch (L"pi", L"pi", false, 0));
-  ASSERT_EQ(1, FindWholeWordMatch (L" pi", L"pi", false, 0));
-  ASSERT_EQ(1, FindWholeWordMatch (L" pi ", L"pi", false, 0));
-  ASSERT_EQ(0, FindWholeWordMatch (L"pi ", L"pi", false, 0));
-
-  // partial matches
-  ASSERT_EQ(-1, FindWholeWordMatch (L"pie ", L"pi", false, 0));
-  ASSERT_EQ(-1, FindWholeWordMatch (L" pie ", L"pi", false, 0));
-  ASSERT_EQ(-1, FindWholeWordMatch (L"pie", L"pi", false, 0));
-  ASSERT_EQ(-1, FindWholeWordMatch (L" pie", L"pi", false, 0));
-
-  // partial match with non-alphanumeric chars
-  ASSERT_EQ(-1, FindWholeWordMatch (L" pumpkin_pie ", L"pie", false, 0));
-  ASSERT_EQ(-1, FindWholeWordMatch (L" pie_crust ", L"pie", false, 0));
-  ASSERT_EQ(-1, FindWholeWordMatch (L"tartar", L"tar", false, 0));
-  ASSERT_EQ(-1, FindWholeWordMatch (L"pie!", L"pie", false, 0));
-}
-
-TEST(StringTest, ReplaceWholeWord) {
-  CString str (L"pie");
-  ReplaceWholeWord (L"ie", L"..", false, &str);
-  ASSERT_STREQ(str, L"pie");
-
-  ReplaceWholeWord (L"pie", L"..", false, &str);
-  ASSERT_STREQ(str, L"..");
-
-  str = L"banana pie";
-  ReplaceWholeWord (L"pie", L"..", false, &str);
-  ASSERT_STREQ(str, L"banana ..");
-
-  str = L"banana pie";
-  ReplaceWholeWord (L"banana", L"..", false, &str);
-  ASSERT_STREQ(str, L".. pie");
-
-  str = L"banana pie";
-  ReplaceWholeWord (L"banana pie", L" .. ", false, &str);
-  ASSERT_STREQ(str, L" .. ");
-
-  str = L"banana pie";
-  ReplaceWholeWord (L"pi", L" .. ", false, &str);
-  ASSERT_STREQ(str, L"banana pie");
-
-  str = L"ishniferatsu";
-  ReplaceWholeWord (L"era", L" .. ", false, &str);
-  ASSERT_STREQ(str, L"ishniferatsu");
-
-  str = L"i i i hi ii i";
-  ReplaceWholeWord (L"i", L"you", false, &str);
-  ASSERT_STREQ(str, L"you you you hi ii you");
-
-  str = L"a nice cream cheese pie";
-  ReplaceWholeWord (L"cream cheese", L"..", false, &str);
-  ASSERT_STREQ(str, L"a nice .. pie");
-
-  // ---
-  // Test replacement with whitespace trimming
-
-  // Replace in the middle of the string.
-  str = L"a nice cream cheese pie";
-  ReplaceWholeWord (L"cream cheese", L"..", true, &str);
-  ASSERT_STREQ(str, L"a nice..pie");
-
-  // Replace in the beginning of the string.
-  str = L"a nice cream cheese pie";
-  ReplaceWholeWord (L"a nice", L"..", true, &str);
-  ASSERT_STREQ(str, L"..cream cheese pie");
-
-  // Replace in the end of the string.
-  str = L"a nice cream cheese pie";
-  ReplaceWholeWord (L"pie", L"..", true, &str);
-  ASSERT_STREQ(str, L"a nice cream cheese..");
-}
-
 TEST(StringTest, GetAbsoluteUri) {
   ASSERT_STREQ(GetAbsoluteUri(L"http://www.google.com"),
                L"http://www.google.com/");
@@ -625,37 +450,6 @@ TEST(StringTest, GetAbsoluteUri) {
                L"http://www.google.com/");
   ASSERT_STREQ(GetAbsoluteUri(L"http://www.google.com/test"),
                L"http://www.google.com/test");
-}
-
-void TestTrim(const TCHAR *str, const TCHAR *result) {
-  ASSERT_TRUE(result);
-  ASSERT_TRUE(str);
-
-  size_t ptr_size = _tcslen(str) + 1;
-  TCHAR* ptr = new TCHAR[ptr_size];
-  _tcscpy_s(ptr, ptr_size, str);
-
-  int len = Trim(ptr);
-  ASSERT_STREQ(ptr, result);
-  ASSERT_EQ(len, lstrlen(result));
-
-  delete [] ptr;
-}
-
-TEST(StringTest, Trim) {
-  TestTrim(L"", L"");
-  TestTrim(L" ", L"");
-  TestTrim(L"\t", L"");
-  TestTrim(L"\n", L"");
-  TestTrim(L"\n\t    \t \n", L"");
-  TestTrim(L"    joe", L"joe");
-  TestTrim(L"joe      ", L"joe");
-  TestTrim(L"    joe      ", L"joe");
-  TestTrim(L"joe smith    ", L"joe smith");
-  TestTrim(L"     joe smith    ", L"joe smith");
-  TestTrim(L"     joe   smith    ", L"joe   smith");
-  TestTrim(L"     The quick brown fox,\tblah", L"The quick brown fox,\tblah");
-  TestTrim(L" \tblah\n    joe smith    ", L"blah\n    joe smith");
 }
 
 // IsSpaceA1 is much faster without the cache clearing (which is what happends
@@ -718,8 +512,8 @@ void TestIsSpace (const char *s) {
 
     // used to try to clear the processor cache
     const size_t dlen = 100000;
-    char* dummy = new char [dlen];
-    RandBytes(dummy, sizeof(*dummy) * dlen);
+    char* rand_bytes = new char [dlen];
+    RandBytes(rand_bytes, sizeof(*rand_bytes) * dlen);
 
     size_t num_spaces = 0;
     size_t n = iterations * len;
@@ -731,7 +525,7 @@ void TestIsSpace (const char *s) {
         t1.Stop();
         // this cache clearing code gets optimized out in release mode
         size_t d2 = 0;
-        for (size_t j = 0; j < dlen; j++) { d2 += dummy[j]; }
+        for (size_t j = 0; j < dlen; j++) { d2 += rand_bytes[j]; }
     }
 
     num_spaces = 0;
@@ -742,7 +536,7 @@ void TestIsSpace (const char *s) {
         }
         t2.Stop();
         size_t d2 = 0;
-        for (size_t j = 0; j < dlen; j++) { d2 += dummy[j]; }
+        for (size_t j = 0; j < dlen; j++) { d2 += rand_bytes[j]; }
     }
 
     num_spaces = 0;
@@ -753,46 +547,15 @@ void TestIsSpace (const char *s) {
         }
         t3.Stop();
         size_t d2 = 0;
-        for (size_t j = 0; j < dlen; j++) { d2 += dummy[j]; }
+        for (size_t j = 0; j < dlen; j++) { d2 += rand_bytes[j]; }
     }
 
-    delete[] dummy;
+    delete[] rand_bytes;
 }
 
 TEST(StringTest, IsSpace) {
   TestIsSpace("banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie banana pie");
   TestIsSpace("sdlfhdkgheorutsgj sdlj aoi oaj gldjg opre gdsfjng oate yhdnv ;zsj fpoe v;kjae hgpaieh dajlgn aegh avn WEIf h9243y 9814cu 902t7 9[-32 [O8W759 RC90817 V9pDAHc n( ny(7LKFJAOISF *&^*^%$$%#*&^(*_*)_^& 67% 796%&$*^$ 8)6 (^ 08&^ )*^ 9-7=90z& +(^ )^* %9%4386 $& (& &+ 7- &(_* ");
-}
-
-void TestCleanupWhitespace(const TCHAR *str, const TCHAR *result) {
-  ASSERT_TRUE(result);
-  ASSERT_TRUE(str);
-
-  size_t ptr_size = _tcslen(str) + 1;
-  TCHAR* ptr = new TCHAR[ptr_size];
-  _tcscpy_s(ptr, ptr_size, str);
-
-  int len = CleanupWhitespace(ptr);
-  ASSERT_STREQ(ptr, result);
-  ASSERT_EQ(len, lstrlen(result));
-
-  delete [] ptr;
-}
-
-TEST(StringTest, CleanupWhitespace) {
-  TestCleanupWhitespace(L"", L"");
-  TestCleanupWhitespace(L"a    ", L"a");
-  TestCleanupWhitespace(L"    a", L"a");
-  TestCleanupWhitespace(L" a   ", L"a");
-  TestCleanupWhitespace(L"\t\n\r a   ", L"a");
-  TestCleanupWhitespace(L"  \n   a  \t   \r ", L"a");
-  TestCleanupWhitespace(L"a      b", L"a b");
-  TestCleanupWhitespace(L"   a \t\n\r     b", L"a b");
-  TestCleanupWhitespace(L"   vool                 voop", L"vool voop");
-  TestCleanupWhitespace(L"thisisaverylongstringwithsometext",
-                        L"thisisaverylongstringwithsometext");
-  TestCleanupWhitespace(L"thisisavery   longstringwithsometext",
-                        L"thisisavery longstringwithsometext");
 }
 
 TEST(StringTest, IsDigit) {
@@ -935,100 +698,6 @@ TEST(StringTest, IsHexDigit) {
   }
 }
 
-TEST(StringTest, Remove) {
-  CString temp_remove;
-
-  // Remove everything
-  temp_remove = _T("ftp://");
-  RemoveFromStart (temp_remove, _T("ftp://"), false);
-  ASSERT_STREQ(temp_remove, _T(""));
-
-  // Remove all but 1 letter
-  temp_remove = _T("ftp://a");
-  RemoveFromStart (temp_remove, _T("ftp://"), false);
-  ASSERT_STREQ(temp_remove, _T("a"));
-
-  // Remove the first instance
-  temp_remove = _T("ftp://ftp://");
-  RemoveFromStart (temp_remove, _T("ftp://"), false);
-  ASSERT_STREQ(temp_remove, _T("ftp://"));
-
-  // Remove normal
-  temp_remove = _T("ftp://taz the tiger");
-  RemoveFromStart (temp_remove, _T("ftp://"), false);
-  ASSERT_STREQ(temp_remove, _T("taz the tiger"));
-
-  // Wrong prefix
-  temp_remove = _T("ftp:/taz the tiger");
-  RemoveFromStart (temp_remove, _T("ftp://"), false);
-  ASSERT_STREQ(temp_remove, _T("ftp:/taz the tiger"));
-
-  // Not long enough
-  temp_remove = _T("ftp:/");
-  RemoveFromStart (temp_remove, _T("ftp://"), false);
-  ASSERT_STREQ(temp_remove, _T("ftp:/"));
-
-  // Remove nothing
-  temp_remove = _T("ftp:/");
-  RemoveFromStart (temp_remove, _T(""), false);
-  ASSERT_STREQ(temp_remove, _T("ftp:/"));
-
-  // Remove 1 character
-  temp_remove = _T("ftp:/");
-  RemoveFromStart (temp_remove, _T("f"), false);
-  ASSERT_STREQ(temp_remove, _T("tp:/"));
-
-  // Wrong case
-  temp_remove = _T("ftp:/");
-  RemoveFromStart (temp_remove, _T("F"), false);
-  ASSERT_STREQ(temp_remove, _T("ftp:/"));
-
-  // Remove everything
-  temp_remove = _T(".edu");
-  RemoveFromEnd (temp_remove, _T(".edu"));
-  ASSERT_STREQ(temp_remove, _T(""));
-
-  // Remove all but 1 letter
-  temp_remove = _T("a.edu");
-  RemoveFromEnd(temp_remove, _T(".edu"));
-  ASSERT_STREQ(temp_remove, _T("a"));
-
-  // Remove the first instance
-  temp_remove = _T(".edu.edu");
-  RemoveFromEnd(temp_remove, _T(".edu"));
-  ASSERT_STREQ(temp_remove, _T(".edu"));
-
-  // Remove normal
-  temp_remove = _T("ftp://taz the tiger.edu");
-  RemoveFromEnd(temp_remove, _T(".edu"));
-  ASSERT_STREQ(temp_remove, _T("ftp://taz the tiger"));
-
-  // Wrong suffix
-  temp_remove = _T("ftp:/taz the tiger.edu");
-  RemoveFromEnd(temp_remove, _T("/edu"));
-  ASSERT_STREQ(temp_remove, _T("ftp:/taz the tiger.edu"));
-
-  // Not long enough
-  temp_remove = _T("edu");
-  RemoveFromEnd(temp_remove, _T(".edu"));
-  ASSERT_STREQ(temp_remove, _T("edu"));
-
-  // Remove nothing
-  temp_remove = _T(".edu");
-  RemoveFromEnd(temp_remove, _T(""));
-  ASSERT_STREQ(temp_remove, _T(".edu"));
-
-  // Remove 1 character
-  temp_remove = _T(".edu");
-  RemoveFromEnd(temp_remove, _T("u"));
-  ASSERT_STREQ(temp_remove, _T(".ed"));
-
-  // Wrong case
-  temp_remove = _T(".edu");
-  RemoveFromEnd(temp_remove, _T("U"));
-  ASSERT_STREQ(temp_remove, _T(".edu"));
-}
-
 TEST(StringTest, WideToAnsiDirect) {
   CString temp_convert;
   ASSERT_STREQ("", WideToAnsiDirect(_T("")));
@@ -1052,115 +721,36 @@ TEST(StringTest, WideToAnsiDirect) {
   }
 }
 
-TEST(StringTest, FindStringASpaceStringB) {
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type: text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-TYPE: text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-TYPE: text/HTML", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-TYPE: text/HTML", L"content-type:", L"text/HTML"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-TYPE: text/HTML", L"content-TYPE:", L"text/HTML"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:  text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:   text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type: sdfjsldkgjsdg content-type:    text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type: content-type: sdfjsldkgjsdg content-type:    text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:content-type: sdfjsldkgjsdg content-type:    text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:content-type:    text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"test/html content-type:content-type:    text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:    text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:\ttext/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:\t text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"Content-Type:\t text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"aasd content-type: text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"aa content-TYPE: text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"text.html  content-TYPE: text/HTML", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"text/html content-TYPE: text/HTML", L"content-type:", L"text/HTML"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"AAAA content-TYPE: text/HTML", L"content-TYPE:", L"text/HTML"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:text/html AAAAA", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:  text/html", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:   text/htmlaaa", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:    text/html  asdsdg content-type", L"content-type:", L"text/html"));
-  ASSERT_TRUE(FindStringASpaceStringB(L"content-type:\ttext/htmlconttent-type:te", L"content-type:", L"text/html"));
+TEST(StringTest, Base64) {
+  struct {
+    const char* binary;
+    const char* base64;
+  } test_data[] = {
+    "",                                "",
+    "what",                            "d2hhdA==",
+    "what will print out",             "d2hhdCB3aWxsIHByaW50IG91dA==",
+    "foobar",                          "Zm9vYmFy",
+    "a man, a plan, a canal: panama!", "YSBtYW4sIGEgcGxhbiwgYSBjYW5hbDogcGFuYW1hIQ==",    // NOLINT
+  };
 
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:  a  text/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:  content-type:  a  text/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type: b text/html  content-type:  a  text/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:-text/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:\ntext/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:  a  TEXT/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:  a  html/text", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"a dss content-type:  a  text/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"text/html content-type:-text/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"text/html sdfsd fcontent-type:\ntext/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"AAAA content-type:  a  TEXT/html", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:  a  html/text AAA", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:content-type:", L"content-type:", L"text/html"));
-  ASSERT_FALSE(FindStringASpaceStringB(L"content-type:content-type: content-type:", L"content-type:", L"text/html"));
+  for (size_t i = 0; i != arraysize(test_data); i++) {
+    CStringA test_e;
+    Base64Escape(test_data[i].binary,
+                 strlen(test_data[i].binary),
+                 &test_e,
+                 true);
+    EXPECT_STREQ(test_e, test_data[i].base64);
+
+    CStringA test_d;
+    ASSERT_GE(Base64Unescape(test_e, &test_d), 0);
+    EXPECT_STREQ(test_d, test_data[i].binary);
+  }
 }
 
-TEST(StringTest, ElideIfNeeded) {
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 3, 3), L"1..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 4, 3), L"12..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 5, 3), L"123..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 6, 3), L"1234..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 7, 3), L"1234..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 8, 3), L"1234..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 9, 3), L"1234..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 10, 3), L"1234..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 11, 3), L"1234 6789..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 12, 3), L"1234 6789..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 13, 3), L"1234 6789..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 14, 3), L"1234 6789 1234");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 15, 3), L"1234 6789 1234");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 16, 3), L"1234 6789 1234");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 17, 3), L"1234 6789 1234");
-
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 7, 6), L"1234..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 8, 6), L"1234 6..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 9, 6), L"1234 67..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 10, 6), L"1234 678..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 11, 6), L"1234 6789..");
-  ASSERT_STREQ(ElideIfNeeded(L"1234 6789 1234", 12, 6), L"1234 6789..");
-}
-
-TEST(StringTest, SafeStrCat) {
-  const int kDestLen = 7;
-  TCHAR dest[kDestLen];
-  lstrcpyn(dest, L"short", kDestLen);
-  ASSERT_LT(lstrlen(dest), kDestLen);
-
-  dest[kDestLen-1] = 'a';
-  lstrcpyn(dest, L"medium123", kDestLen);
-  ASSERT_EQ(dest[kDestLen - 1], '\0');
-  ASSERT_LT(lstrlen(dest), kDestLen);
-
-  lstrcpyn(dest, L"longerlonger", kDestLen);
-  ASSERT_EQ(dest[kDestLen - 1], '\0');
-  ASSERT_LT(lstrlen(dest), kDestLen);
-
-  lstrcpyn(dest, L"12", kDestLen);
-  SafeStrCat(dest, L"3456", kDestLen);
-  ASSERT_EQ(dest[kDestLen - 1], '\0');
-  ASSERT_LT(lstrlen(dest), kDestLen);
-}
-
-void TestPathFindExtension(const TCHAR *s) {
-  ASSERT_STREQ(String_PathFindExtension(s), PathFindExtension(s));
-}
-
-TEST(StringTest, TestPathFindExtension) {
-  TestPathFindExtension(L"c:\\test.tmp");
-  TestPathFindExtension(L"c:\\test.temp");
-  TestPathFindExtension(L"c:\\t\\e\\st.temp");
-  TestPathFindExtension(L"c:\\a.temp");
-  TestPathFindExtension(L"\\aaa\\a.temp");
-  TestPathFindExtension(L"\\a\\a.temp");
-  TestPathFindExtension(L"\\a\\a.temp");
-  TestPathFindExtension(L"\\a\\a.t....emp");
-  TestPathFindExtension(L"\\a.a.a...a\\a.t....emp");
-  TestPathFindExtension(L"\\a\\a\\bbbb\\ddddddddddddddd.temp");
-  TestPathFindExtension(L"\\a\\a\\bbbb\\ddddddddddddddd.te___124567mp");
-  TestPathFindExtension(L"\\a\\a\\bbbb\\ddddddd.dddddddd.te___124567mp");
+TEST(StringTest, Base64Unescape) {
+  CStringA input("AAAAAAAA");
+  CStringA output;
+  ASSERT_EQ(Base64Unescape(input, &output), input.GetLength() * 3 / 4);
 }
 
 TEST(StringTest, TextToLinesAndBack) {
@@ -1197,15 +787,6 @@ TEST(StringTest, TrimString) {
   ASSERT_STREQ(L"abc", TrimStdString(L" \tabc\t "));
   ASSERT_STREQ(L"", TrimStdString(L""));
   ASSERT_STREQ(L"", TrimStdString(L"   "));
-}
-
-TEST(StringTest, StripFirstQuotedToken) {
-  ASSERT_STREQ(StripFirstQuotedToken(L""), L"");
-  ASSERT_STREQ(StripFirstQuotedToken(L"a" ), L"");
-  ASSERT_STREQ(StripFirstQuotedToken(L"  a b  "), L"b");
-  ASSERT_STREQ(StripFirstQuotedToken(L"\"abc\" def"), L" def");
-  ASSERT_STREQ(StripFirstQuotedToken(L"  \"abc def\" ghi  "), L" ghi");
-  ASSERT_STREQ(StripFirstQuotedToken(L"\"abc\"   \"def\" "), L"   \"def\"");
 }
 
 TEST(StringTest, EscapeUnescape) {
@@ -1373,67 +954,6 @@ TEST(StringTest, BytesToHex) {
   const uint8* last  = first + sizeof(array);
   EXPECT_STREQ(BytesToHex(std::vector<uint8>(first, last)),
                _T("0123456789abcdef"));
-}
-
-TEST(StringTest, JoinStrings) {
-  std::vector<CString> components;
-  const TCHAR* delim = _T("-");
-  CString result;
-
-  JoinStrings(components, delim, &result);
-  EXPECT_TRUE(result.IsEmpty());
-  JoinStrings(components, NULL, &result);
-  EXPECT_TRUE(result.IsEmpty());
-
-  components.push_back(CString(_T("foo")));
-  JoinStrings(components, delim, &result);
-  EXPECT_STREQ(result, (_T("foo")));
-  JoinStrings(components, NULL, &result);
-  EXPECT_STREQ(result, (_T("foo")));
-
-  components.push_back(CString(_T("bar")));
-  JoinStrings(components, delim, &result);
-  EXPECT_STREQ(result, (_T("foo-bar")));
-  JoinStrings(components, NULL, &result);
-  EXPECT_STREQ(result, (_T("foobar")));
-
-  components.push_back(CString(_T("baz")));
-  JoinStrings(components, delim, &result);
-  EXPECT_STREQ(result, (_T("foo-bar-baz")));
-  JoinStrings(components, NULL, &result);
-  EXPECT_STREQ(result, (_T("foobarbaz")));
-
-
-  JoinStringsInArray(NULL, 0, delim, &result);
-  EXPECT_TRUE(result.IsEmpty());
-  JoinStringsInArray(NULL, 0, NULL, &result);
-  EXPECT_TRUE(result.IsEmpty());
-
-  const TCHAR* array1[] = {_T("foo")};
-  JoinStringsInArray(array1, arraysize(array1), delim, &result);
-  EXPECT_STREQ(result, (_T("foo")));
-  JoinStringsInArray(array1, arraysize(array1), NULL, &result);
-  EXPECT_STREQ(result, (_T("foo")));
-
-  const TCHAR* array2[] = {_T("foo"), _T("bar")};
-  JoinStringsInArray(array2, arraysize(array2), delim, &result);
-  EXPECT_STREQ(result, (_T("foo-bar")));
-  JoinStringsInArray(array2, arraysize(array2), NULL, &result);
-  EXPECT_STREQ(result, (_T("foobar")));
-
-  const TCHAR* array3[] = {_T("foo"), _T("bar"), _T("baz")};
-  JoinStringsInArray(array3, arraysize(array3), delim, &result);
-  EXPECT_STREQ(result, (_T("foo-bar-baz")));
-  JoinStringsInArray(array3, arraysize(array3), NULL, &result);
-  EXPECT_STREQ(result, (_T("foobarbaz")));
-
-  const TCHAR* array_null_1[] = {NULL};
-  JoinStringsInArray(array_null_1, arraysize(array_null_1), delim, &result);
-  EXPECT_STREQ(result, (_T("")));
-
-  const TCHAR* array_null_2[] = {NULL, NULL};
-  JoinStringsInArray(array_null_2, arraysize(array_null_2), delim, &result);
-  EXPECT_STREQ(result, (_T("-")));
 }
 
 TEST(StringTest, String_ToUpper) {

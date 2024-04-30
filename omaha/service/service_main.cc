@@ -33,6 +33,7 @@ END_OBJECT_MAP()
 BEGIN_OBJECT_MAP(object_map_google_update_medium)
   OBJECT_ENTRY(__uuidof(OnDemandMachineAppsServiceClass), OnDemandService)
   OBJECT_ENTRY(__uuidof(GoogleUpdate3WebServiceClass), Update3WebService)
+  OBJECT_ENTRY(__uuidof(PolicyStatusMachineServiceClass), PolicyStatusService)
   OBJECT_ENTRY(__uuidof(GoogleUpdateCoreClass), GoogleUpdateCoreService)
 END_OBJECT_MAP()
 
@@ -73,7 +74,10 @@ HRESULT Update3ServiceMode::PreMessageLoop() {
   SERVICE_LOG(L1, (_T("[Starting Google Update core...]")));
   CommandLineBuilder builder(COMMANDLINE_MODE_CORE);
   CString args = builder.GetCommandLineArgs();
-  return goopdate_utils::StartGoogleUpdateWithArgs(true, args, NULL);
+  return goopdate_utils::StartGoogleUpdateWithArgs(true,
+                                                   StartMode::kBackground,
+                                                   args,
+                                                   NULL);
 }
 
 CommandLineMode UpdateMediumServiceMode::commandline_mode() {

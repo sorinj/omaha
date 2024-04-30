@@ -25,7 +25,6 @@
 
 #include "omaha/base/commontypes.h"
 #include "omaha/base/debug.h"
-#include "omaha/base/localization.h"
 #include "omaha/base/logging.h"
 #include "omaha/base/safe_format.h"
 
@@ -86,12 +85,6 @@ bool IsSpaceA(char c) {
   return spaces[static_cast<unsigned char>(c)] == 1;
 }
 
-int TrimCString(CString &s) {
-  int len = Trim(s.GetBuffer());
-  s.ReleaseBufferSetLength(len);
-  return len;
-}
-
 void MakeLowerCString(CString & s) {
   int len = s.GetLength();
   String_FastToLower(s.GetBuffer());
@@ -132,39 +125,6 @@ int Trim(TCHAR *s) {
 
 void TrimString(CString& s, const TCHAR* delimiters) {
   s = s.Trim(delimiters);
-}
-
-// Strip the first token from the front of argument s.  A token is a
-// series of consecutive non-blank characters - unless the first
-// character is a double-quote ("), in that case the token is the full
-// quoted string
-CString StripFirstQuotedToken(const CString& s) {
-  const int npos = -1;
-
-  // Make a writeable copy
-  CString str(s);
-
-  // Trim any surrounding blanks (and tabs, for the heck of it)
-  TrimString(str, L" \t");
-
-  // Too short to have a second token
-  if (str.GetLength() <= 1)
-    return L"";
-
-  // What kind of token are we stripping?
-  if (str[0] == L'\"') {
-    // Remove leading quoting string
-    int i = str.Find(L"\"", 1);
-    if (i != npos)
-      i++;
-    return str.Mid(i);
-  } else {
-    // Remove leading token
-    int i = str.FindOneOf(L" \t");
-    if (i != npos)
-      i++;
-    return str.Mid(i);
-  }
 }
 
 // A block of text to separate lines, and back
@@ -214,53 +174,6 @@ void LinesToText(const std::vector<CString>& lines, const TCHAR* delimiter, CStr
       text->Append(delimiter);
     }
   }
-}
-
-int CleanupWhitespaceCString(CString &s) {
-  int len = CleanupWhitespace(s.GetBuffer());
-  s.ReleaseBufferSetLength(len);
-  return len;
-}
-
-int CleanupWhitespace(TCHAR *str) {
-  ASSERT(str, (L""));
-
-  TCHAR *src      = str;
-  TCHAR *dest     = str;
-  int    num_spaces   = 0;
-  bool   at_start = true;
-  while (true) {
-    // At end of string?
-    TCHAR c = *src;
-    if (0 == c)
-      break;
-
-    // Look for whitespace; copy it over if not whitespace
-    if (IsSpace(c)) {
-      ++num_spaces;
-    }
-    else {
-      *dest++ = c;
-      at_start = false;
-      num_spaces = 0;
-    }
-
-    // Write only first consecutive space (but skip space at start)
-    if (1 == num_spaces && !at_start)
-      *dest++ = ' ';
-
-    ++src;
-  }
-
-  // Remove trailing space, if any
-  if (dest > str && *(dest - 1) == L' ')
-    --dest;
-
-  // 0-terminate
-  *dest = 0;
-
-  // TODO(portability): cast is unsafe.
-  return static_cast<int>(dest - str);
 }
 
 // Take 1 single hexadecimal "digit" (as a character) and return its decimal value
@@ -318,20 +231,6 @@ WCHAR *ToWide (const char *s, int len) {
     // ASSERT (rc <= len, (L""));
     w[rc]=L'\0';
     return w;
-}
-
-const byte *BufferContains (const byte *buf, uint32 buf_len, const byte *data, uint32 data_len) {
-  ASSERT(data, (L""));
-  ASSERT(buf, (L""));
-
-  for (uint32 i = 0; i < buf_len; i++) {
-    uint32 j = i;
-    uint32 k = 0;
-    uint32 len = 0;
-    while (j < buf_len && k < data_len && buf[j++] == data[k++]) { len++; }
-    if (len == data_len) { return buf + i; }
-  }
-  return 0;
 }
 
 // Converting the Ansi Multibyte String into unicode string. The multibyte
@@ -474,23 +373,6 @@ CString Utf8BufferToWideChar(const std::vector<uint8>& buffer) {
   return result;
 }
 
-CString AbbreviateString (const CString & title, int32 max_len) {
-    ASSERT (max_len, (L""));
-    CString s(title);
-    TrimCString(s);  // remove whitespace at start/end
-    if (s.GetLength() > max_len) {
-        s = s.Left (max_len - 2);
-        CString orig(s);
-        // remove partial words
-        while (s.GetLength() > 1 && !IsSpace(s[s.GetLength()-1])) { s = s.Left (s.GetLength() - 1); }
-        // but not if it would make the string very short
-        if (s.GetLength() < max_len / 2) { s = orig; }
-        s += _T("..");
-        }
-
-    return s;
-}
-
 CString GetAbsoluteUri(const CString& uri) {
   int i = String_FindString(uri, _T("://"));
   if (i==-1) return uri;
@@ -556,82 +438,6 @@ CString GetUriHostNameHostOnly(const CString& uri, bool strip_leading) {
   return ss.Left(j);
 }
 
-CString AbbreviateUri(const CString& uri, int32 max_len) {
-  ASSERT1(max_len);
-  ASSERT1(!uri.IsEmpty());
-
-  CString s(uri);
-  VERIFY1(String_FindString (s, _T("://")));
-
-  TrimCString(s);
-  // SKIP_LOC_BEGIN
-  RemoveFromStart (s, _T("ftp://"), false);
-  RemoveFromStart (s, _T("http://"), false);
-  RemoveFromStart (s, _T("https://"), false);
-  RemoveFromStart (s, _T("www."), false);
-  RemoveFromStart (s, _T("ftp."), false);
-  RemoveFromStart (s, _T("www-"), false);
-  RemoveFromStart (s, _T("ftp-"), false);
-  RemoveFromEnd (s, _T(".htm"));
-  RemoveFromEnd (s, _T(".html"));
-  RemoveFromEnd (s, _T(".asp"));
-  // SKIP_LOC_END
-  if (s.GetLength() > max_len) {
-    // try to keep the portion after the last /
-    int32 last_slash = s.ReverseFind ((TCHAR)'/');
-    CString after_last_slash;
-    if (last_slash == -1) { after_last_slash = _T(""); }
-    else { after_last_slash = s.Right (uri.GetLength() - last_slash - 1); }
-    if (after_last_slash.GetLength() > max_len / 2) {
-        after_last_slash = after_last_slash.Right (max_len / 2);
-    }
-    s = s.Left (max_len - after_last_slash.GetLength() - 2);
-    s += "..";
-    s += after_last_slash;
-  }
-  return s;
-}
-
-// normalized version of a URI intended to map duplicates to the same string
-// the normalized URI is not a valid URI
-CString NormalizeUri (const CString & uri) {
-  CString s(uri);
-  TrimCString(s);
-  MakeLowerCString(s);
-  // SKIP_LOC_BEGIN
-  ReplaceCString (s, _T(":80"), _T(""));
-
-  RemoveFromEnd (s, _T("/index.html"));
-  RemoveFromEnd (s, _T("/welcome.html"));  // old netscape standard
-  RemoveFromEnd (s, _T("/"));
-
-  RemoveFromStart (s, _T("ftp://"), false);
-  RemoveFromStart (s, _T("http://"), false);
-  RemoveFromStart (s, _T("https://"), false);
-  RemoveFromStart (s, _T("www."), false);
-  RemoveFromStart (s, _T("ftp."), false);
-  RemoveFromStart (s, _T("www-"), false);
-  RemoveFromStart (s, _T("ftp-"), false);
-
-  ReplaceCString (s, _T("/./"), _T("/"));
-  // SKIP_LOC_END
-
-  // TODO(omaha):
-  // fixup URLs like a/b/../../c
-  // while ($s =~ m!\/\.\.\!!) {
-  //    $s =~ s!/[^/]*/\.\./!/!;
-  //    }
-
-  // TODO(omaha):
-  // unescape characters
-  // Note from RFC1630:  "Sequences which start with a percent sign
-  // but are not followed by two hexadecimal characters are reserved
-  // for future extension"
-  // $str =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/eg if defined $str;
-
-  return s;
-}
-
 CString RemoveInternetProtocolHeader (const CString& url) {
   int find_colon_slash_slash = String_FindString(url, NOTRANSL(L"://"));
   if( find_colon_slash_slash != -1 ) {
@@ -660,14 +466,6 @@ HRESULT ConvertFileUriToLocalPath(const CString& uri, CString* path_out) {
                                    &buf_len,
                                    NULL);
   return hr;
-}
-
-void RemoveFromStart (CString & s, const TCHAR* remove, bool ignore_case) {
-  ASSERT(remove, (L""));
-
-  // Remove the characters if it is the prefix
-  if (String_StartsWith(s, remove, ignore_case))
-    s.Delete(0, lstrlen(remove));
 }
 
 bool String_EndsWith(const TCHAR *str, const TCHAR *end_str, bool ignore_case) {
@@ -715,75 +513,6 @@ CString String_MakeEndWith(const TCHAR* str, const TCHAR* end_str, bool ignore_c
   }
 }
 
-void RemoveFromEnd (CString & s, const TCHAR* remove) {
-  ASSERT(remove, (L""));
-
-  // If the suffix is shorter than the string, don't bother
-  int remove_len = lstrlen(remove);
-  if (s.GetLength() < remove_len) return;
-
-  // If the suffix is equal
-  int suffix_begin = s.GetLength() - remove_len;
-  if (0 == lstrcmp(s.GetString() + suffix_begin, remove))
-    s.Delete(suffix_begin, remove_len);
-}
-
-CString ElideIfNeeded (const CString & input_string, int max_len, int min_len) {
-  ASSERT (min_len <= max_len, (L""));
-  ASSERT (max_len >= TSTR_SIZE(kEllipsis)+1, (L""));
-  ASSERT (min_len >= TSTR_SIZE(kEllipsis)+1, (L""));
-
-  CString s = input_string;
-
-  s.TrimRight();
-  if (s.GetLength() > max_len) {
-    int truncate_at = max_len - TSTR_SIZE(kEllipsis);
-    // find first space going backwards from character one after the truncation point
-    while (truncate_at >= min_len && !IsSpace(s.GetAt(truncate_at)))
-      truncate_at--;
-
-    // skip the space(s)
-    while (truncate_at >= min_len && IsSpace(s.GetAt(truncate_at)))
-      truncate_at--;
-
-    truncate_at++;
-
-    if (truncate_at <= min_len || truncate_at > (max_len - static_cast<int>(TSTR_SIZE(kEllipsis)))) {
-      // we weren't able to break at a word boundary, may as well use more of the string
-      truncate_at = max_len - TSTR_SIZE(kEllipsis);
-
-      // skip space(s)
-      while (truncate_at > 0 && IsSpace(s.GetAt(truncate_at-1)))
-        truncate_at--;
-    }
-
-    s = s.Left(truncate_at);
-    s += kEllipsis;
-  }
-
-  UTIL_LOG(L6, (L"elide (%d %d) %s -> %s", min_len, max_len, input_string, s));
-  return s;
-}
-
-// these functions untested
-// UTF8 parameter supported on XP/2000 only
-HRESULT AnsiToUTF8 (char * src, int src_len, char * dest, int *dest_len) {
-  ASSERT (dest_len, (L""));
-  ASSERT (dest, (L""));
-  ASSERT (src, (L""));
-
-  // First use MultiByteToWideChar(CP_UTF8, ...) to convert to Unicode
-  // then use WideCharToMultiByte to convert from Unicode to UTF8
-  WCHAR *unicode = new WCHAR [(src_len + 1) * sizeof (TCHAR)]; ASSERT (unicode, (L""));
-  int chars_written = MultiByteToWideChar (CP_ACP, 0, src, src_len, unicode, src_len);
-  ASSERT (chars_written == src_len, (L""));
-  const char *unmappable = " ";
-  BOOL unmappable_characters = false;
-  *dest_len = WideCharToMultiByte (CP_UTF8, 0, unicode, chars_written, dest, *dest_len, unmappable, &unmappable_characters);
-  delete [] unicode;
-  return S_OK;
-}
-
 // Convert Wide to ANSI directly. Use only when it is all ANSI
 CStringA WideToAnsiDirect(const CString & in) {
   int in_len = in.GetLength();
@@ -797,330 +526,6 @@ CStringA WideToAnsiDirect(const CString & in) {
 
   out.ReleaseBuffer(in_len);
   return out;
-}
-
-HRESULT UCS2ToUTF8 (LPCWSTR src, int src_len, char * dest, int *dest_len) {
-  ASSERT(dest_len, (L""));
-  ASSERT(dest, (L""));
-
-  *dest_len = WideCharToMultiByte (CP_UTF8, 0, src, src_len, dest, *dest_len, NULL,NULL);
-  return S_OK;
-}
-
-HRESULT UTF8ToUCS2 (const char * src, int src_len, LPWSTR dest, int *dest_len) {
-  ASSERT (dest_len, (L""));
-  ASSERT (src, (L""));
-
-  *dest_len = MultiByteToWideChar (CP_UTF8, 0, src, src_len, dest, *dest_len);
-  ASSERT (*dest_len == src_len, (L""));
-  return S_OK;
-}
-
-HRESULT UTF8ToAnsi (char * src, int, char * dest, int *dest_len) {
-  ASSERT(dest_len, (L""));
-  ASSERT(dest, (L""));
-  ASSERT(src, (L""));
-
-  src; dest; dest_len;  // unreferenced formal parameter
-
-  // First use MultiByteToWideChar(CP_UTF8, ...) to convert to Unicode
-  // then use WideCharToMultiByte to convert from Unicode to ANSI
-  return E_FAIL;
-}
-
-// clean up a string so it can be included within a JavaScript string
-// mainly involves escaping characters
-CString SanitizeString(const CString & in, DWORD mode) {
-  CString out(in);
-
-  if (mode & kSanHtml) {
-    // SKIP_LOC_BEGIN
-    ReplaceCString(out, _T("&"), _T("&amp;"));
-    ReplaceCString(out, _T("<"), _T("&lt;"));
-    ReplaceCString(out, _T(">"), _T("&gt;"));
-    // SKIP_LOC_END
-  }
-
-  if ((mode & kSanXml) == kSanXml) {
-    // SKIP_LOC_BEGIN
-    ReplaceCString(out, _T("'"), _T("&apos;"));
-    ReplaceCString(out, _T("\""), _T("&quot;"));
-    // SKIP_LOC_END
-  }
-
-  // Note that this SAN_JAVASCRIPT and kSanXml should not be used together.
-  ASSERT ((mode & (kSanJs | kSanXml)) != (kSanJs | kSanXml), (L""));
-
-  if ((mode & kSanJs) == kSanJs) {
-    // SKIP_LOC_BEGIN
-    ReplaceCString(out, _T("\\"), _T("\\\\"));
-    ReplaceCString(out, _T("\'"), _T("\\\'"));
-    ReplaceCString(out, _T("\""), _T("\\\""));
-    ReplaceCString(out, _T("\n"), _T(" "));
-    ReplaceCString(out, _T("\t"), _T(" "));
-    // SKIP_LOC_END
-  }
-
-  if ((mode & kSanHtmlInput) == kSanHtmlInput) {
-    // SKIP_LOC_BEGIN
-    ReplaceCString(out, _T("\""), _T("&quot;"));
-    ReplaceCString(out, _T("'"), _T("&#39;"));
-    // SKIP_LOC_END
-  }
-
-  return out;
-}
-
-// Bolds the periods used for abbreviation.  Call this after HighlightTerms.
-CString BoldAbbreviationPeriods(const CString & in) {
-  CString out(in);
-  CString abbrev;
-  for (int i = 0; i < kAbbreviationPeriodLength; ++i)
-    abbrev += _T(".");
-  ReplaceCString(out, abbrev, NOTRANSL(_T("<b>")) + abbrev + NOTRANSL(_T("</b>")));
-  return out;
-}
-
-// Unescape a escaped sequence leading by a percentage symbol '%',
-// and converted the unescaped sequence (in UTF8) into unicode.
-// Inputs:  src is the input string.
-//          pos is the starting position.
-// Returns: true if a EOS(null) char was encounted.
-//          out contains the unescaped and converted unicode string.
-//          consumed_length is how many bytes in the src string have been
-//          unescaped.
-// We can avoid the expensive UTF8 conversion step if there are no higher
-// ansi characters So if there aren't any, just convert it ANSI-to-WIDE
-// directly, which is cheaper.
-inline bool UnescapeSequence(const CString &src, int pos,
-                             CStringW *out, int *consumed_length) {
-  ASSERT1(out);
-  ASSERT1(consumed_length);
-
-  int length = src.GetLength();
-  // (input_len - pos) / 3 is enough for un-escaping the (%xx)+ sequences.
-  int max_dst_length = (length - pos) / 3;
-  std::unique_ptr<char[]> unescaped(new char[max_dst_length]);
-  char *buf = unescaped.get();
-  if (buf == NULL) {  // no enough space ???
-    *consumed_length = 0;
-    return false;
-  }
-  char *dst = buf;
-  bool is_utf8 = false;
-  // It is possible that there is a null character '\0' in the sequence.
-  // Because the CStringT does't support '\0' in it, we stop
-  // parsing the input string when it is encounted.
-  bool eos_encounted = false;
-  uint8 ch;
-  int s = pos;
-  while (s + 2 < length && src[s] == '%' && !eos_encounted &&
-         ExtractChar(src, s + 1, &ch)) {
-    if (ch != 0)
-      *dst++ = ch;
-    else
-      eos_encounted = true;
-    if (ch >= 128)
-      is_utf8 = true;
-    s += 3;
-  }
-
-  ASSERT1(dst <= buf + max_dst_length);  // just to make sure
-
-  // TODO(portability): cast is unsafe.
-  *consumed_length = s - pos;
-  if (is_utf8)
-    AnsiToWideString(buf, static_cast<int>(dst - buf), CP_UTF8, out);
-  else
-    *out = AnsiToWideString(buf, static_cast<int>(dst - buf));
-  return eos_encounted;
-}
-
-// There is an encoding called "URL-encoding". This function takes a URL-encoded string
-// and converts it back to the original representation
-// example: "?q=moon+doggy_%25%5E%26&" = "moon doggy_%^&"
-CString Unencode(const CString &input) {
-  const int input_len = input.GetLength();
-  const TCHAR *src = input.GetString();
-  // input_len is enough for containing the unencoded string.
-  CString out;
-  TCHAR *head = out.GetBuffer(input_len);
-  TCHAR *dst = head;
-  int s = 0;
-  bool eos_encounted = false;
-  bool is_utf8 = false;
-  CStringW fragment;
-  int consumed_length = 0;
-  while (s < input_len && !eos_encounted) {
-    switch (src[s]) {
-      case '+' :
-        *dst++ = ' ';
-        ASSERT1(dst <= head + input_len);
-        ++s;
-        break;
-      case '%' :
-        eos_encounted =
-          UnescapeSequence(input, s, &fragment, &consumed_length);
-        if (consumed_length > 0) {
-          s += consumed_length;
-          ASSERT1(dst + fragment.GetLength() <= head + input_len);
-          for (int i = 0; i < fragment.GetLength(); ++i)
-            *dst++ = fragment[i];
-        } else {
-          *dst++ = src[s++];
-          ASSERT1(dst <= head + input_len);
-        }
-        break;
-      default:
-        *dst++ = src[s];
-        ASSERT1(dst <= head + input_len);
-        ++s;
-    }
-  }
-  // TODO(portability): cast is unsafe.
-  int out_len = static_cast<int>(dst - head);
-  out.ReleaseBuffer(out_len);
-  return out;
-}
-
-CString GetTextInbetween(const CString &input, const CString &start, const CString &end) {
-  int start_index = String_FindString(input, start);
-  if (start_index == -1)
-    return L"";
-
-  start_index += start.GetLength();
-  int end_index = String_FindString(input, end, start_index);
-  if (end_index == -1)
-    return L"";
-
-  return input.Mid(start_index, end_index - start_index);
-}
-
-// Given a string, get the parameter and url-unencode it
-CString GetParam(const CString & input, const CString & key) {
-  CString my_key(_T("?"));
-  my_key.Append(key);
-  my_key += L'=';
-
-  return Unencode(GetTextInbetween(input, my_key, NOTRANSL(L"?")));
-}
-
-// Get an xml-like field from a string
-CString GetField (const CString & input, const CString & field) {
-  CString start_field(NOTRANSL(_T("<")));
-  start_field += field;
-  start_field += L'>';
-
-  int32 start = String_FindString(input, start_field);
-  if (start == -1) { return _T(""); }
-  start += 2 + lstrlen (field);
-
-  CString end_field(NOTRANSL(_T("</")));
-  end_field += field;
-  end_field += L'>';
-
-  int32 end = String_FindString(input, end_field);
-  if (end == -1) { return _T(""); }
-
-  return input.Mid (start, end - start);
-}
-
-// ------------------------------------------------------------
-// Finds a whole word match in the query.
-// If the word has non-spaces either before or after, it will not qualify as
-//   a match.  i.e. "pie!" is not a match because of the exclamation point.
-// TODO(omaha): Add parameter that will consider punctuation acceptable.
-//
-// Optionally will look for a colon at the end.
-// If not found, return -1.
-int FindWholeWordMatch (const CString &query,
-  const CString &word_to_match,
-  const bool end_with_colon,
-  const int index_begin) {
-  if (word_to_match.IsEmpty()) {
-    return -1;
-  }
-
-  int index_word_begin = index_begin;
-
-  // Keep going until we find a whole word match, or the string ends.
-  do {
-    index_word_begin = String_FindString (query, word_to_match, index_word_begin);
-
-    if (-1 == index_word_begin) {
-      return index_word_begin;
-    }
-
-    // If it's not a whole word match, keep going.
-    if (index_word_begin > 0 &&
-      !IsSpaceW (query[index_word_begin - 1])) {
-      goto LoopEnd;
-    }
-
-    if (end_with_colon) {
-      int index_colon = String_FindChar (query, L':', index_word_begin);
-
-      // If there is no colon in the string, return now.
-      if (-1 == index_colon) {
-        return -1;
-      }
-
-      // If there is text between the end of the word and the colon, keep going.
-      if (index_colon - index_word_begin != word_to_match.GetLength()) {
-        goto LoopEnd;
-      }
-    } else {
-      // If there are more chars left after this word/phrase, and
-      // they are not spaces, return.
-      if (query.GetLength() > index_word_begin + word_to_match.GetLength() &&
-        !IsSpaceW (query.GetAt (index_word_begin + word_to_match.GetLength()))) {
-        goto LoopEnd;
-      }
-    }
-
-    // It fits all the requirements, so return the index to the beginning of the word.
-    return index_word_begin;
-
-LoopEnd:
-    ++index_word_begin;
-
-  } while (-1 != index_word_begin);
-
-  return index_word_begin;
-}
-
-// --------------------------------------------------------
-// Do whole-word replacement in "str".
-void ReplaceWholeWord (const CString &string_to_replace,
-  const CString &replacement,
-  const bool trim_whitespace,
-  CString *str) {
-  ASSERT (str, (L"ReplaceWholeWord"));
-
-  if (string_to_replace.IsEmpty() || str->IsEmpty()) {
-    return;
-  }
-
-  int index_str = 0;
-  do {
-    index_str = FindWholeWordMatch (*str, string_to_replace, false, index_str);
-
-    if (-1 != index_str) {
-      // Get the strings before and after, and trim whitespace.
-      CString str_before_word(str->Left (index_str));
-      if (trim_whitespace) {
-        str_before_word.TrimRight();
-      }
-
-      CString str_after_word(str->Mid (index_str + string_to_replace.GetLength()));
-      if (trim_whitespace) {
-        str_after_word.TrimLeft();
-      }
-
-      *str = str_before_word + replacement + str_after_word;
-      index_str += replacement.GetLength() + 1;
-    }
-  } while (index_str != -1);
 }
 
 // --------------------------------------------------------
@@ -1206,71 +611,6 @@ const WCHAR *stristrW(const WCHAR *string, const WCHAR *pattern)
   }
 
   return NULL;
-}
-
-// case sensitive Unicode strstr
-// adapted from http://c.snippets.org/snip_lister.php?fname=stristr.c
-const WCHAR *strstrW(const WCHAR *string, const WCHAR *pattern)
-{
-  ASSERT (pattern, (L""));
-  ASSERT (string, (L""));
-  ASSERT (string && pattern, (L""));
-  const WCHAR *start;
-
-  for (start = string; *start != 0; start++)
-  {
-    // find start of pattern in string
-    for ( ; ((*start!=0) && (*start != *pattern)); start++)
-     ;
-    if (0 == *start)
-     return NULL;
-
-    const WCHAR *pattern_ptr = pattern;
-    const WCHAR *string_ptr = start;
-
-    while (*string_ptr == *pattern_ptr)
-    {
-      string_ptr++;
-      pattern_ptr++;
-
-      // if end of pattern then pattern was found
-      if (0 == *pattern_ptr)
-        return (start);
-    }
-  }
-
-  return NULL;
-}
-
-// -------------------------------------------------------------------------
-// Helper function
-float GetLenWithWordWrap (const float len_so_far,
-  const float len_to_add,
-  const uint32 len_line) {
-  // lint -save -e414  Possible division by 0
-  ASSERT (len_line != 0, (L""));
-
-  float len_total = len_so_far + len_to_add;
-
-  // Figure out if we need to word wrap by seeing if adding the second
-  // string will cause us to span more lines than before.
-  uint32 num_lines_before = static_cast<uint32> (len_so_far / len_line);
-  uint32 num_lines_after = static_cast<uint32> (len_total / len_line);
-
-  // If it just barely fit onto the line, do not wrap to the next line.
-  if (num_lines_after > 0 && (len_total / len_line - num_lines_after == 0)) {
-    --num_lines_after;
-  }
-
-  if (num_lines_after > num_lines_before)  {
-    // Need to word wrap.
-    // lint -e{790}  Suspicious truncation
-    return num_lines_after * len_line + len_to_add;
-  }
-  else
-    return len_total;
-
-  // lint -restore
 }
 
 int CalculateBase64EscapedLen(int input_len, bool do_padding) {
@@ -1368,12 +708,6 @@ default:
 
 #define kWebSafeBase64Chars "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
-int Base64Escape(const char *src, int szsrc, char *dest, int szdest) {
-  ASSERT(dest, (L""));
-  ASSERT(src, (L""));
-
-  return Base64EscapeInternal(src, szsrc, dest, szdest, kBase64Chars, true);
-}
 int WebSafeBase64Escape(const char *src, int szsrc, char *dest,
   int szdest, bool do_padding) {
     ASSERT(dest, (L""));
@@ -1655,6 +989,15 @@ int Base64Unescape(const char *src, int len_src, char *dest, int len_dest) {
   return Base64UnescapeInternal(src, len_src, dest, len_dest, UnBase64);
 }
 
+int Base64Unescape(const CStringA& src, CStringA* dest) {
+  ASSERT1(dest);
+
+  int len = src.GetLength();
+  int unescape_len = Base64Unescape(src, len, dest->GetBuffer(len + 1), len);
+  dest->ReleaseBufferSetLength(unescape_len >= 0 ? unescape_len : 0);
+  return unescape_len;
+}
+
 int WebSafeBase64Unescape(const char *src, int szsrc, char *dest, int szdest) {
   ASSERT(dest, (L""));
   ASSERT(src, (L""));
@@ -1733,68 +1076,6 @@ int HexDigitToInt (WCHAR c) {
   return ((c >= L'a') ? ((c - L'a') + 10) :
           (c >= L'A') ? ((c - L'A') + 10) :
           (c - L'0'));
-}
-
-// ----------------------------------------------------------------------
-// int QuotedPrintableUnescape()
-//
-// Check out http://www.cis.ohio-state.edu/htbin/rfc/rfc2045.html for
-// more details, only briefly implemented. But from the web...
-// Quoted-printable is an encoding method defined in the MIME
-// standard. It is used primarily to encode 8-bit text (such as text
-// that includes foreign characters) into 7-bit US ASCII, creating a
-// document that is mostly readable by humans, even in its encoded
-// form. All MIME compliant applications can decode quoted-printable
-// text, though they may not necessarily be able to properly display the
-// document as it was originally intended. As quoted-printable encoding
-// is implemented most commonly, printable ASCII characters (values 33
-// through 126, excluding 61), tabs and spaces that do not appear at the
-// end of lines, and end-of-line characters are not encoded. Other
-// characters are represented by an equal sign (=) immediately followed
-// by that character's hexadecimal value. Lines that are longer than 76
-// characters are shortened by line breaks, with the equal sign marking
-// where the breaks occurred.
-//
-// Update: we really want QuotedPrintableUnescape to conform to rfc2047,
-// which expands the q encoding. In particular, it specifices that _'s are
-// to be treated as spaces.
-// ----------------------------------------------------------------------
-int QuotedPrintableUnescape(const WCHAR *source, int slen,
-                            WCHAR *dest, int len_dest) {
-  ASSERT(dest, (L""));
-  ASSERT(source, (L""));
-
-  WCHAR* d = dest;
-  const WCHAR* p = source;
-
-  while (*p != '\0' && p < source+slen && d < dest+len_dest) {
-    switch (*p) {
-      case '=':
-        if (p == source+slen-1) {
-          // End of line, no need to print the =..
-          // TODO(portability): cast is unsafe.
-          return static_cast<int>(d-dest);
-        }
-        // if its valid, convert to hex and insert
-        if (p < source+slen-2 && IsHexDigit(p[1]) && IsHexDigit(p[2])) {
-          // lint -e{734} Loss of precision
-          *d++ = static_cast<WCHAR>(
-                    HexDigitToInt(p[1]) * 16 + HexDigitToInt(p[2]));
-          p += 3;
-        } else {
-          p++;
-        }
-        break;
-      case '_':   // According to rfc2047, _'s are to be treated as spaces
-        *d++ = ' '; p++;
-        break;
-      default:
-        *d++ = *p++;
-        break;
-    }
-  }
-  // TODO(portability): cast is unsafe.
-  return static_cast<int>(d-dest);
 }
 
 // TODO(omaha): currently set not to use IsCharUpper because that is relatively slow
@@ -2218,56 +1499,6 @@ bool String_IsIdentifierChar(const TCHAR c) {
           c == _T('_'));
 }
 
-// Returns true if the string has letters in it.
-// This is used by the keyword extractor to downweight numbers,
-// IDs (sequences of numbers like social security numbers), etc.
-bool String_HasAlphabetLetters (const TCHAR * str) {
-  ASSERT (str, (L""));
-
-  while (*str != '\0') {
-    // if (iswalpha (*str)) {
-    // Note that IsCharAlpha is slower but we want to avoid the CRT
-    if (IsCharAlpha (*str)) {
-      return true;
-    }
-    ++str;
-  }
-
-  return false;
-}
-
-CString String_LargeIntToApproximateString(uint64 value, bool base_ten, int* power) {
-  uint32 to_one_decimal;
-
-  uint32 gig         = base_ten ? 1000000000 : (1<<30);
-  uint32 gig_div_10  = base_ten ?  100000000 : (1<<30)/10;
-  uint32 meg         = base_ten ?    1000000 : (1<<20);
-  uint32 meg_div_10  = base_ten ?     100000 : (1<<20)/10;
-  uint32 kilo        = base_ten ?       1000 : (1<<10);
-  uint32 kilo_div_10 = base_ten ?        100 : (1<<10)/10;
-
-  if (value >= gig) {
-    if (power) *power = 3;
-    to_one_decimal = static_cast<uint32>(value / gig_div_10);
-  } else if (value >= meg) {
-    if (power) *power = 2;
-    to_one_decimal = static_cast<uint32>(value / meg_div_10);
-  } else if (value >= kilo) {
-    if (power) *power = 1;
-    to_one_decimal = static_cast<uint32>(value / kilo_div_10);
-  } else {
-    if (power) *power = 0;
-    return String_Int64ToString(static_cast<uint32>(value), 10 /*radix*/);
-  }
-
-  uint32 whole_part = to_one_decimal / 10;
-
-  if (whole_part < 10)
-    return Show(0.1 * static_cast<double>(to_one_decimal), 1);
-
-  return String_Int64ToString(whole_part, 10 /*radix*/);
-}
-
 int String_FindString(const TCHAR *s1, const TCHAR *s2) {
   ASSERT(s2, (L""));
   ASSERT(s1, (L""));
@@ -2322,25 +1553,6 @@ int String_FindChar(const TCHAR *str, const TCHAR c) {
   return -1;
 }
 
-// taken from wcsrchr, modified to behave in the CString way
-int String_ReverseFindChar(const TCHAR * str,TCHAR c) {
-  ASSERT (str, (L""));
-  TCHAR *start = (TCHAR *)str;
-
-  while (*str++)                       /* find end of string */
-    ;
-  /* search towards front */
-  while (--str != start && *str != (TCHAR)c)
-    ;
-
-  if (*str == (TCHAR)c) {            /* found ? */
-    // TODO(portability): cast is unsafe.
-    return static_cast<int>(str - start);
-  }
-
-  return -1;
-}
-
 int String_FindChar(const TCHAR *str, const TCHAR c, int start_pos) {
   ASSERT (str, (L""));
   int n = 0;
@@ -2361,21 +1573,6 @@ bool String_Contains(const TCHAR *s1, const TCHAR *s2) {
   ASSERT(s1, (L""));
 
   return -1 != String_FindString(s1, s2);
-}
-
-void String_ReplaceChar(TCHAR *str, TCHAR old_char, TCHAR new_char) {
-  ASSERT (str, (L""));
-  while (*str) {
-    if (*str == old_char)
-      *str = new_char;
-
-    ++str;
-  }
-}
-
-void String_ReplaceChar(CString & str, TCHAR old_char, TCHAR new_char) {
-  String_ReplaceChar (str.GetBuffer(), old_char, new_char);
-  str.ReleaseBuffer();
 }
 
 int ReplaceCString (CString & src, const TCHAR *from, const TCHAR *to) {
@@ -2519,40 +1716,6 @@ int ReplaceCString (CString & src, const TCHAR *from, unsigned int from_len,
   return matches;
 }
 
-// Functions on arrays of strings
-
-// Returns true iff s is in the array strings (case-insensitive compare)
-bool String_MemberOf(const TCHAR* const* strings, const TCHAR* s) {
-  ASSERT(s, (L""));
-  // strings may be NULL
-
-  const int s_length = lstrlen(s);
-  if (strings == NULL)
-    return false;
-  for (; *strings != NULL; strings++) {
-    if (0 == String_StrNCmp(*strings, s, s_length, true)) {
-      return true;      // Found equal string
-    }
-  }
-  return false;
-}
-
-// Returns index of s in the array of strings (or -1 for missing) (case-insensitive compare)
-int String_IndexOf(const TCHAR* const* strings, const TCHAR* s) {
-  ASSERT(s, (L""));
-  // strings may be NULL
-
-  const int s_length = lstrlen(s);
-  if (strings == NULL)
-    return -1;
-  for (int i = 0; *strings != NULL; i++, strings++) {
-    if (0 == String_StrNCmp(*strings, s, s_length, true)) {
-      return i;      // Found equal string
-    }
-  }
-  return -1;
-}
-
 // The internal format is a int64.
 time64 StringToTime(const CString & time) {
   return static_cast<time64>(String_StringToInt64(time));
@@ -2565,70 +1728,12 @@ CString TimeToString(const time64 & time) {
   return String_Int64ToString(static_cast<int64>(time), 10);
 }
 
-const TCHAR *FindStringASpaceStringB (const TCHAR *s, const TCHAR *a, const TCHAR *b) {
-  ASSERT(s, (L""));
-  ASSERT(a, (L""));
-  ASSERT(b, (L""));
-
-  const TCHAR *search_from = s;
-  const TCHAR *pos;
-  while (*search_from && (pos = stristrW (search_from, a)) != NULL) {
-      const TCHAR *start = pos;
-      pos += lstrlen(a);
-      search_from = pos;
-      while (*pos == ' ' || *pos == '\t') pos++;
-      if (!String_StrNCmp (pos, b, lstrlen(b), true)) return start;
-  }
-
-  return 0;
-}
-
 bool IsAlphaA (const char c) {
   return ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
 }
 
 bool IsDigitA (const char c) {
   return (c >= '0' && c <= '9');
-}
-
-void SafeStrCat (TCHAR *dest, const TCHAR *src, int dest_buffer_len) {
-  _tcscat_s(dest, dest_buffer_len, src);
-}
-
-// extracts next float in a string
-// skips any non-digit characters
-// return position after end of float
-const TCHAR *ExtractNextDouble (const TCHAR *s, double *f) {
-  ASSERT (f, (L""));
-  ASSERT (s, (L""));
-
-  CString num;
-  while (*s && !String_IsDigit (*s)) s++;
-  while (*s && (*s == '.' || String_IsDigit (*s))) { num += *s; s++; }
-  ASSERT (num.GetLength(), (L""));
-  *f = String_StringToDouble (num);
-  return s;
-}
-
-TCHAR *String_PathFindExtension(const TCHAR *path) {
-  ASSERT(path, (L""));
-
-  // Documentation says PathFindExtension string must be of max length
-  // MAX_PATH but a trusted tester hit the ASSERT and we don't really
-  // need it here, so commented out. We can't address where it is
-  // called because it's called from ATL code.
-  // ASSERT(lstrlen(path)<=MAX_PATH, (L""));
-
-  // point to terminating NULL
-  const TCHAR *ret = path + lstrlen(path);
-  const TCHAR *pos = ret;
-
-  while (--pos >= path) {
-    if (*pos == '.')
-      return const_cast<TCHAR *>(pos);
-  }
-
-  return const_cast<TCHAR *>(ret);
 }
 
 char String_ToLowerCharAnsi(char c) {
@@ -2642,50 +1747,6 @@ int String_ToLowerChar(int c) {
     return String_ToLowerCharAnsi(static_cast<char>(c));
 
   return Char_ToLower(static_cast<TCHAR>(c));
-}
-
-
-bool String_PathRemoveFileSpec(TCHAR *path) {
-  ASSERT (path, (L""));
-
-  int len, pos;
-  len = pos = lstrlen (path);
-
-  // You might think that the SHLWAPI API does not change "c:\windows" -> "c:\"
-  // when c:\windows is a directory, but it does.
-
-  // If we don't want to match this weird API we can use the following to check
-  // for directories:
-
-  // Check if we are already a directory.
-  WIN32_FILE_ATTRIBUTE_DATA attrs;
-  // Failure (if file does not exist) is OK.
-  BOOL success = GetFileAttributesEx(path, GetFileExInfoStandard, &attrs);
-  UTIL_LOG(L4, (_T("[String_PathRemoveFileSpec][path %s][success %d][dir %d]"),
-                path,
-                success,
-                attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY));
-  if (success && (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-    // Remove trailing backslash, if any.
-    if (path[pos-1] == '\\')
-      path[pos-1] = '\0';
-    return 1;
-  }
-
-  // Find last backslash.
-  while (pos && path[pos] != '\\') pos--;
-  if (!pos && path[pos] != '\\') return 0;
-
-  ASSERT (pos < len, (L""));
-
-  // The documentation says it removes backslash but it doesn't for c:\.
-  if (!pos || path[pos-1] == ':' || (pos == 1 && path[0] == '\\'))
-    // Keep the backslash in this case.
-    path[pos+1] = '\0';
-  else
-    path[pos] = '\0';
-
-  return 1;
 }
 
 void String_EndWithChar(TCHAR *str, TCHAR c) {
@@ -2745,19 +1806,6 @@ bool String_StringToDecimalIntChecked(const TCHAR* str, int* value) {
   return true;
 }
 
-bool CLSIDToCString(const GUID& guid, CString* str) {
-  ASSERT(str, (L""));
-
-  LPOLESTR string_guid = NULL;
-  if (::StringFromCLSID(guid, &string_guid) != S_OK) {
-    return false;
-  }
-  *str = string_guid;
-  ::CoTaskMemFree(string_guid);
-
-  return true;
-}
-
 HRESULT String_StringToBool(const TCHAR* str, bool* value) {
   ASSERT1(str);
   ASSERT1(value);
@@ -2776,7 +1824,7 @@ HRESULT String_StringToBool(const TCHAR* str, bool* value) {
   return S_OK;
 }
 
-const TCHAR* const String_BoolToString(bool value) {
+const TCHAR* String_BoolToString(bool value) {
   return value ? kTrue : kFalse;
 }
 
@@ -2975,54 +2023,6 @@ CString BytesToHex(const std::vector<uint8>& bytes) {
   return result;
 }
 
-void JoinStrings(const std::vector<CString>& components,
-                 const TCHAR* delim,
-                 CString* result) {
-  ASSERT1(result);
-  result->Empty();
-
-  // Compute length so we can reserve memory.
-  size_t length = 0;
-  size_t delim_length = delim ? _tcslen(delim) : 0;
-  for (size_t i = 0; i != components.size(); ++i) {
-    if (i != 0) {
-      length += delim_length;
-    }
-    length += components[i].GetLength();
-  }
-
-  ASSERT1(length <= INT_MAX && delim_length <= INT_MAX);
-  if (length > INT_MAX || delim_length > INT_MAX) {
-    return;
-  }
-
-  result->Preallocate(static_cast<int>(length));
-
-  for (size_t i = 0; i != components.size(); ++i) {
-    if (i != 0 && delim) {
-      result->Append(delim, static_cast<int>(delim_length));
-    }
-    result->Append(components[i]);
-  }
-}
-
-void JoinStringsInArray(const TCHAR* components[],
-                        int num_components,
-                        const TCHAR* delim,
-                        CString* result) {
-  ASSERT1(result);
-  result->Empty();
-
-  for (int i = 0; i != num_components; ++i) {
-    if (i != 0 && delim) {
-      result->Append(delim);
-    }
-    if (components[i]) {
-      result->Append(components[i]);
-    }
-  }
-}
-
 CString FormatResourceMessage(uint32 resource_id, ...) {
   CString format;
   const bool is_loaded = !!format.LoadString(resource_id);
@@ -3151,25 +2151,6 @@ static void a2b_hex_t(const char* a, T b, size_t num) {
   }
 }
 
-string a2b_bin(const string& a, bool byte_order_msb) {
-  string result;
-  const char *data = a.c_str();
-  size_t num_bytes = (a.size()+7)/8;
-  for (size_t byte_offset = 0; byte_offset < num_bytes; ++byte_offset) {
-    unsigned char c = 0;
-    for (size_t bit_offset = 0; bit_offset < 8; ++bit_offset) {
-      if (*data == '\0')
-        break;
-      if (*data++ != '0') {
-        size_t bits_to_shift = (byte_order_msb) ? 7-bit_offset : bit_offset;
-        c |= (1 << bits_to_shift);
-      }
-    }
-    result.append(1, c);
-  }
-  return result;
-}
-
 // This is a templated function so that T can be either a char*
 // or a string.  This works because we use the [] operator to access
 // individual characters at a time.
@@ -3179,17 +2160,6 @@ static void b2a_hex_t(const unsigned char* b, T a, size_t num) {
     a[i * 2 + 0] = hex_char[b[i] >> 4];
     a[i * 2 + 1] = hex_char[b[i] & 0xf];
   }
-}
-
-string b2a_bin(const string& b, bool byte_order_msb) {
-  string result;
-  for (size_t byte_offset = 0; byte_offset < b.size(); ++byte_offset) {
-    for (size_t bit_offset = 0; bit_offset < 8; ++bit_offset) {
-      size_t x = (byte_order_msb) ? 7-bit_offset : bit_offset;
-      result.append(1, (b[byte_offset] & (1 << x)) ? '1' : '0');
-    }
-  }
-  return result;
 }
 
 void b2a_hex(const unsigned char* b, char* a, size_t num) {
@@ -3269,4 +2239,3 @@ bool SafeHexStringToVector(const CStringW& str, std::vector<uint8>* vec_out) {
 }
 
 }  // namespace omaha
-

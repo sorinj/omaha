@@ -25,6 +25,7 @@
 #include "omaha/base/smart_handle.h"
 #include "omaha/base/string.h"
 #include "omaha/base/system_info.h"
+#include "omaha/base/utils.h"
 #include "omaha/goopdate/cred_dialog.h"
 #include "omaha/third_party/smartany/scoped_any.h"
 
@@ -32,10 +33,6 @@ using omaha::encrypt::EncryptData;
 using omaha::encrypt::DecryptData;
 
 namespace omaha {
-
-static const GUID kPreIE7CredTypeGuid = { 0x5e7e8100, 0x9138, 0x11d1,
-  { 0x94, 0x5a, 0x00, 0xc0, 0x4f, 0xc3, 0x08, 0xff } };
-static const GUID kPreIE7CredSubtypeGuid = { 0 };
 
 #define kIE7CredKey "abe2869f-9b47-4cd9-a358-c22904dba7f7"
 
@@ -248,7 +245,7 @@ HRESULT ProxyAuth::SetProxyAuthScheme(const CString& proxy_server,
 // This approach (the key in particular) comes from a securityfocus posting:
 // http://www.securityfocus.com/archive/1/458115/30/0/threaded
 bool ProxyAuth::ReadFromIE7(const CString& server) {
-  scoped_library crypt_lib(::LoadLibrary(L"crypt32.dll"));
+  scoped_library crypt_lib(LoadSystemLibrary(_T("crypt32.dll")));
   ASSERT1(crypt_lib);
   if (!crypt_lib)
     return false;
@@ -264,7 +261,7 @@ bool ProxyAuth::ReadFromIE7(const CString& server) {
 
   // Load CredEnumerate and CredFree dynamically because they don't exist on
   // Win2K and so loading the GoogleDesktopCommon.dll otherwise.
-  scoped_library advapi_lib(::LoadLibrary(L"advapi32.dll"));
+  scoped_library advapi_lib(LoadSystemLibrary(_T("advapi32.dll")));
   ASSERT1(advapi_lib);
   if (!advapi_lib)
     return false;
@@ -339,7 +336,7 @@ bool ProxyAuth::ReadFromIE7(const CString& server) {
 // reading credentials from the IE6 is not supported anymore.
 bool ProxyAuth::ReadFromPreIE7(const CString& server) {
 #if (_MSC_VER < 1800)
-  scoped_library pstore_lib(::LoadLibrary(L"pstorec.dll"));
+  scoped_library pstore_lib(LoadSystemLibrary(_T("pstorec.dll"));
   ASSERT1(pstore_lib);
   if (!pstore_lib)
     return false;
@@ -364,11 +361,11 @@ bool ProxyAuth::ReadFromPreIE7(const CString& server) {
   // the item_name returned by this iterator was a microsoft patent application:
   // http://www.patentstorm.us/patents/6272631-description.html
   CComPtr<IPStore> pstore;
-  VERIFY1(SUCCEEDED(hr = PStoreCreateInstance_fn(&pstore, NULL, NULL, 0)));
+  VERIFY_SUCCEEDED(hr = PStoreCreateInstance_fn(&pstore, NULL, NULL, 0));
   if (SUCCEEDED(hr)) {
     CComPtr<IEnumPStoreTypes> enum_types;
-    VERIFY1(SUCCEEDED(hr = pstore->EnumTypes(PST_KEY_CURRENT_USER, 0,
-                                             &enum_types)));
+    VERIFY_SUCCEEDED(hr = pstore->EnumTypes(PST_KEY_CURRENT_USER, 0,
+                                             &enum_types));
     if (SUCCEEDED(hr)) {
       GUID type_guid = { 0 };
       // Get the types one at a time
@@ -377,8 +374,8 @@ bool ProxyAuth::ReadFromPreIE7(const CString& server) {
           continue;
 
         CComPtr<IEnumPStoreTypes> enum_subtypes;
-        VERIFY1(SUCCEEDED(hr = pstore->EnumSubtypes(PST_KEY_CURRENT_USER,
-          &type_guid, 0, &enum_subtypes)));
+        VERIFY_SUCCEEDED(hr = pstore->EnumSubtypes(PST_KEY_CURRENT_USER,
+          &type_guid, 0, &enum_subtypes));
         if (SUCCEEDED(hr)) {
           GUID subtype_guid = { 0 };
           // Get the subtypes one at a time
@@ -387,8 +384,8 @@ bool ProxyAuth::ReadFromPreIE7(const CString& server) {
               continue;
 
             CComPtr<IEnumPStoreItems> enum_items;
-            VERIFY1(SUCCEEDED(hr = pstore->EnumItems(PST_KEY_CURRENT_USER,
-              &type_guid, &subtype_guid, 0, &enum_items)));
+            VERIFY_SUCCEEDED(hr = pstore->EnumItems(PST_KEY_CURRENT_USER,
+              &type_guid, &subtype_guid, 0, &enum_items));
             if (SUCCEEDED(hr)) {
               wchar_t* item_name = NULL;
               // Get the items one at a time
@@ -396,9 +393,9 @@ bool ProxyAuth::ReadFromPreIE7(const CString& server) {
                 DWORD data_length = 0;
                 byte* data = NULL;
 
-                VERIFY1(SUCCEEDED(hr = pstore->ReadItem(PST_KEY_CURRENT_USER,
+                VERIFY_SUCCEEDED(hr = pstore->ReadItem(PST_KEY_CURRENT_USER,
                   &type_guid, &subtype_guid, item_name, &data_length, &data,
-                  NULL, 0)));
+                  NULL, 0));
                 if (SUCCEEDED(hr)) {
                   found = ParseCredsFromRawBuffer(data, data_length,
                                                   &username, &password);

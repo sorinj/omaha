@@ -16,16 +16,25 @@
 #include "omaha/client/install_apps.h"
 
 #include <atlsafe.h>
+#include <ocidl.h>
+#include <olectl.h>
+#include <windows.h>
 
+#include <memory>
+
+#include "goopdate/omaha3_idl.h"
+#include "omaha/base/const_addresses.h"
 #include "omaha/base/const_object_names.h"
 #include "omaha/base/debug.h"
 #include "omaha/base/error.h"
 #include "omaha/base/logging.h"
 #include "omaha/base/reactor.h"
+#include "omaha/base/safe_format.h"
 #include "omaha/base/scope_guard.h"
 #include "omaha/base/shutdown_callback.h"
 #include "omaha/base/shutdown_handler.h"
 #include "omaha/base/string.h"
+#include "omaha/base/thread_pool_callback.h"
 #include "omaha/base/time.h"
 #include "omaha/base/utils.h"
 #include "omaha/base/vista_utils.h"
@@ -44,7 +53,7 @@
 #include "omaha/common/lang.h"
 #include "omaha/common/ping.h"
 #include "omaha/common/update3_utils.h"
-#include "goopdate/omaha3_idl.h"
+#include "omaha/goopdate/goopdate.h"
 #include "omaha/ui/progress_wnd.h"
 
 namespace omaha {
@@ -54,8 +63,12 @@ namespace {
 // Implements the UI progress window.
 class SilentProgressObserver : public InstallProgressObserver {
  public:
-  explicit SilentProgressObserver(BundleInstaller* installer)
-      : installer_(installer) {
+  SilentProgressObserver(BundleInstaller* installer,
+                         bool is_machine,
+                         bool always_launch_cmd)
+      : installer_(installer),
+        is_machine_(is_machine),
+        always_launch_cmd_(always_launch_cmd) {
     ASSERT1(installer);
   }
 
@@ -135,9 +148,12 @@ class SilentProgressObserver : public InstallProgressObserver {
 
   // Terminates the message loop.
   virtual void OnComplete(const ObserverCompletionInfo& observer_info) {
-    CORE_LOG(L3, (_T("[SilentProgressObserver::OnComplete][%s]"),
-                  observer_info.ToString()));
-    UNREFERENCED_PARAMETER(observer_info);
+    CORE_LOG(L3, (_T("[SilentProgressObserver::OnComplete][%s][%d]"),
+                  observer_info.ToString(), always_launch_cmd_));
+
+    if (always_launch_cmd_) {
+      LaunchCommandLines(observer_info, is_machine_);
+    }
 
     installer_->DoExit();
     CORE_LOG(L1, (_T("[SilentProgressObserver][DoExit() called]")));
@@ -145,6 +161,8 @@ class SilentProgressObserver : public InstallProgressObserver {
 
  private:
   BundleInstaller *const installer_;
+  const bool is_machine_;
+  const bool always_launch_cmd_;
 };
 
 class OnDemandEvents : public OnDemandEventsInterface {
@@ -219,6 +237,15 @@ class BundleAtlModule : public CAtlExeModuleT<BundleAtlModule> {
 
 namespace internal {
 
+struct LoadLogoParameters {
+ public:
+  LoadLogoParameters(const CString& appid, HWND wnd)
+      : app_id(appid), logo_wnd(wnd) {}
+
+  CString app_id;
+  HWND logo_wnd;
+};
+
 bool IsBrowserRestartSupported(BrowserType browser_type) {
   return (browser_type != BROWSER_UNKNOWN &&
           browser_type != BROWSER_DEFAULT &&
@@ -277,13 +304,13 @@ bool InstallAppsWndEvents::DoRestartBrowser(bool terminate_all_browsers,
   TerminateBrowserResult browser_res;
   TerminateBrowserResult default_res;
   if (terminate_all_browsers) {
-    VERIFY1(SUCCEEDED(goopdate_utils::TerminateAllBrowsers(browser,
+    VERIFY_SUCCEEDED(goopdate_utils::TerminateAllBrowsers(browser,
                                                            &browser_res,
-                                                           &default_res)));
+                                                           &default_res));
   } else {
-    VERIFY1(SUCCEEDED(goopdate_utils::TerminateBrowserProcesses(browser,
+    VERIFY_SUCCEEDED(goopdate_utils::TerminateBrowserProcesses(browser,
                                                                 &browser_res,
-                                                                &default_res)));
+                                                                &default_res));
   }
 
   BrowserType default_browser_type = BROWSER_UNKNOWN;
@@ -334,6 +361,96 @@ CString GetBundleDisplayName(IAppBundle* app_bundle) {
       CString(bundle_name) : client_utils::GetDefaultBundleName();
 }
 
+// The app logo is expected to be hosted at `{kUrlAppLogo}{url escaped
+// app_id}.bmp`. If `{url escaped app_id}.bmp` exists, a logo is shown in
+// the updater UI for that app install.
+//
+// For example, if `app_id` is `{8A69D345-D564-463C-AFF1-A69D9E530F96}`,
+// the `{url escaped app_id}.bmp` is
+// `%7b8A69D345-D564-463C-AFF1-A69D9E530F96%7d.bmp`.
+//
+// `kUrlAppLogo` is specified in omaha/base/const_addresses.h.
+void LoadLogo(LoadLogoParameters params) {
+  CString escaped_app_id;
+  HRESULT hr = StringEscape(params.app_id, false, &escaped_app_id);
+  if (FAILED(hr)) {
+    CORE_LOG(LW, (_T("[StringEscape failed][%#x]"), hr));
+    return;
+  }
+
+  CString app_logo_url;
+  hr = ConfigManager::Instance()->GetAppLogoUrl(&app_logo_url);
+  if (FAILED(hr)) {
+    CORE_LOG(LW, (_T("[GetAppLogoUrl failed][%#x]"), hr));
+    return;
+  }
+
+  CString url;
+  SafeCStringFormat(&url, _T("%s%s.bmp"), app_logo_url, escaped_app_id);
+  CORE_LOG(L1, (_T("[Attempting to load logo from][%s]"), url));
+
+  // Load the logo in BMP format if it exists at the provided `url`, and set the
+  // resultant image onto the app bitmap for the logo window.
+  CComPtr<IPicture> picture;
+  hr = ::OleLoadPicturePath(const_cast<TCHAR*>(url.GetString()), nullptr, 0, 0,
+                            IID_PPV_ARGS(&picture));
+  if (FAILED(hr)) {
+    CORE_LOG(LW, (_T("[::OleLoadPicturePath failed][%#x]"), hr));
+    return;
+  }
+
+  HBITMAP bitmap = nullptr;
+  hr = picture->get_Handle(reinterpret_cast<UINT*>(&bitmap));
+  if (FAILED(hr)) {
+    CORE_LOG(LW, (_T("[picture->get_Handle failed][%#x]"), hr));
+    return;
+  }
+
+  if (!::IsWindow(params.logo_wnd)) {
+    CORE_LOG(LW, (_T("[logo_wnd not valid anymore][%d]"), params.logo_wnd));
+    return;
+  }
+
+  ::SendDlgItemMessage(params.logo_wnd, IDC_APP_BITMAP, STM_SETIMAGE,
+                       IMAGE_BITMAP,
+                       reinterpret_cast<LPARAM>(::CopyImage(
+                           bitmap, IMAGE_BITMAP, 0, 0, LR_COPYRETURNORG)));
+}
+
+// Loads the logo for the first app in `app_bundle`, and shows it in `logo_wnd`.
+HRESULT LoadLogoAsync(IAppBundle* app_bundle, HWND logo_wnd) {
+  ASSERT1(app_bundle);
+  ASSERT1(logo_wnd);
+
+  CComPtr<IApp> app;
+  HRESULT hr = update3_utils::GetApp(app_bundle, 0, &app);
+  if (FAILED(hr)) {
+    CORE_LOG(LE, (_T("[update3_utils::GetApp failed][%#x]"), hr));
+    return hr;
+  }
+
+  CComBSTR primary_app_id;
+  hr = app->get_appId(&primary_app_id);
+  if (FAILED(hr)) {
+    CORE_LOG(LE, (_T("[app->get_appId failed][%#x]"), hr));
+    return hr;
+  }
+
+  // Create a thread pool work item for deferred execution of loading the logo.
+  // The thread pool owns this call back object.
+  using Callback = StaticThreadPoolCallBack1<LoadLogoParameters>;
+  hr = Goopdate::Instance().QueueUserWorkItem(
+      std::make_unique<Callback>(
+          &LoadLogo, LoadLogoParameters(CString(primary_app_id), logo_wnd)),
+      COINIT_APARTMENTTHREADED, WT_EXECUTELONGFUNCTION);
+  if (FAILED(hr)) {
+    CORE_LOG(LE, (_T("[QueueUserWorkItem failed][0x%x]"), hr));
+    return hr;
+  }
+
+  return S_OK;
+}
+
 HRESULT CreateClientUI(bool is_machine,
                        BrowserType browser_type,
                        BundleInstaller* installer,
@@ -364,6 +481,13 @@ HRESULT CreateClientUI(bool is_machine,
   progress_wnd->Show();
   installer->SetBundleParentWindow(progress_wnd->m_hWnd);
 
+  // Load the logo.
+  hr = LoadLogoAsync(app_bundle, progress_wnd->m_hWnd);
+  if (FAILED(hr)) {
+    CORE_LOG(LE, (_T("[LoadLogoAsync failed][%#x]"), hr));
+    // Ignore error and fall through.
+  }
+
   destroy_window_guard.Dismiss();
   observer->reset(progress_wnd.release());
   ui_sink->reset(progress_wnd_events.release());
@@ -379,6 +503,7 @@ HRESULT DoInstallApps(BundleInstaller* installer,
                       IAppBundle* app_bundle,
                       bool is_machine,
                       bool is_interactive,
+                      bool always_launch_cmd,
                       BrowserType browser_type,
                       bool* has_ui_been_displayed) {
   CORE_LOG(L2, (_T("[DoInstallApps]")));
@@ -405,7 +530,8 @@ HRESULT DoInstallApps(BundleInstaller* installer,
     }
     *has_ui_been_displayed = true;
   } else {
-    observer.reset(new SilentProgressObserver(installer));
+    observer.reset(
+        new SilentProgressObserver(installer, is_machine, always_launch_cmd));
   }
 
   hr = installer->InstallBundle(is_machine,
@@ -561,6 +687,7 @@ HRESULT UpdateAppOnDemand(bool is_machine,
 
 HRESULT InstallApps(bool is_machine,
                     bool is_interactive,
+                    bool always_launch_cmd,
                     bool is_eula_accepted,
                     bool is_oem_install,
                     bool is_offline,
@@ -571,10 +698,10 @@ HRESULT InstallApps(bool is_machine,
                     const CString& session_id,
                     bool* has_ui_been_displayed) {
   CORE_LOG(L2, (_T("[InstallApps][is_machine: %u][is_interactive: %u]")
-      _T("[is_eula_accepted: %u][is_oem_install: %u][is_offline: %u]")
-      _T("[is_enterprise_install: %u][offline_directory: %s]"), is_machine,
-      is_interactive, is_eula_accepted, is_oem_install, is_offline,
-      is_enterprise_install, offline_directory));
+      _T("[always_launch_cmd: %u][is_eula_accepted: %u][is_oem_install: %u]")
+      _T("[is_offline: %u][is_enterprise_install: %u][offline_directory: %s]"),
+      is_machine, is_interactive, always_launch_cmd, is_eula_accepted,
+      is_oem_install, is_offline, is_enterprise_install, offline_directory));
   ASSERT1(has_ui_been_displayed);
 
   BundleAtlModule atl_module;
@@ -625,7 +752,59 @@ HRESULT InstallApps(bool is_machine,
                                  app_bundle.Detach(),
                                  is_machine,
                                  is_interactive,
+                                 always_launch_cmd,
                                  extra_args.browser_type,
+                                 has_ui_been_displayed);
+}
+
+HRESULT InstallForceInstallApps(bool is_machine,
+                                bool is_interactive,
+                                const CString& install_source,
+                                const CString& display_language,
+                                const CString& session_id,
+                                bool* has_ui_been_displayed) {
+  CORE_LOG(L2, (_T("[InstallForceInstallApps][%u][%u]"),
+                is_machine, is_interactive));
+  ASSERT1(has_ui_been_displayed);
+
+  BundleAtlModule atl_module;
+  const bool send_pings = true;
+
+  CComPtr<IAppBundle> app_bundle;
+  HRESULT hr = bundle_creator::CreateForceInstallBundle(is_machine,
+                                                        display_language,
+                                                        install_source,
+                                                        session_id,
+                                                        is_interactive,
+                                                        send_pings,
+                                                        &app_bundle);
+  if (FAILED(hr)) {
+    CORE_LOG(LE, (_T("[bundle_creator::CreateForceInstallBundle][%#x]"), hr));
+    return hr;
+  } else if (hr == S_FALSE) {
+    CORE_LOG(L3, (_T("[No apps to force install]")));
+    return hr;
+  }
+
+  BundleInstaller installer(new HelpUrlBuilder(is_machine,
+                                               display_language,
+                                               GUID_NULL,
+                                               CString()),
+                            false,  //  is_update_all_apps
+                            false,  //  is_update_check_only
+                            BROWSER_UNKNOWN);
+  hr = installer.Initialize();
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  atl_module.enable_quit();
+  return internal::DoInstallApps(&installer,
+                                 app_bundle.Detach(),
+                                 is_machine,
+                                 is_interactive,
+                                 /*always_launch_cmd=*/false,
+                                 BROWSER_UNKNOWN,
                                  has_ui_been_displayed);
 }
 
@@ -672,6 +851,7 @@ HRESULT UpdateAllApps(bool is_machine,
                                  app_bundle.Detach(),
                                  is_machine,
                                  is_interactive,
+                                 /*always_launch_cmd=*/false,
                                  BROWSER_UNKNOWN,
                                  has_ui_been_displayed);
 }

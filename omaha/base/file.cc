@@ -90,7 +90,7 @@ File::File()
 
 File::~File() {
   if (handle_ != INVALID_HANDLE_VALUE) {
-    VERIFY1(SUCCEEDED(Close()));
+    VERIFY_SUCCEEDED(Close());
   }
 }
 
@@ -153,34 +153,23 @@ HRESULT File::OpenShareMode(const TCHAR* file_name,
   return S_OK;
 }
 
-// The path must not be enclosed in quotes. This is the Windows standard.
-// ::GetFileAttributesEx() returns ERROR_INVALID_NAME for quoted paths.
-bool File::Exists(const TCHAR* file_name) {
+HRESULT File::IsReparsePoint(const TCHAR* file_name, bool* is_reparse_point) {
   ASSERT1(file_name && *file_name);
-  ASSERT1(lstrlen(file_name) > 0);
+  ASSERT1(is_reparse_point);
 
-  // NOTE: This is the fastest implementation I found.  The results were:
-  //   CreateFile           1783739 avg ticks/call
-  //   FindFirstFile         634148 avg ticks/call
-  //   GetFileAttributes     428714 avg ticks/call
-  //   GetFileAttributesEx   396324 avg ticks/call
-  WIN32_FILE_ATTRIBUTE_DATA attrs = {0};
-  return 0 != ::GetFileAttributesEx(file_name, ::GetFileExInfoStandard, &attrs);
-}
-
-bool File::IsDirectory(const TCHAR* file_name) {
-  ASSERT1(file_name && *file_name);
-
-  WIN32_FILE_ATTRIBUTE_DATA attrs;
-  SetZero(attrs);
+  WIN32_FILE_ATTRIBUTE_DATA attrs = {};
   if (!::GetFileAttributesEx(file_name, ::GetFileExInfoStandard, &attrs)) {
-    UTIL_LOG(LEVEL_ERROR,
-             (_T("[File::IsDirectory - GetFileAttributesEx failed][%s][0x%x]"),
-              file_name, HRESULTFromLastError()));
-    return false;
+    HRESULT hr = HRESULTFromLastError();
+    UTIL_LOG(
+        LE,
+        (_T("[File::IsReparsePoint][::GetFileAttributesEx failed][%s][%#x]"),
+         file_name, hr));
+    return hr;
   }
 
-  return (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+  *is_reparse_point =
+      ((attrs.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+  return S_OK;
 }
 
 HRESULT File::GetWildcards(const TCHAR* dir,
@@ -1050,7 +1039,7 @@ HRESULT File::SetLength(const uint32 n, bool zero_data) {
   HRESULT hr = S_OK;
 
   uint32 len = 0;
-  VERIFY1(SUCCEEDED(GetLength(&len)));
+  VERIFY_SUCCEEDED(GetLength(&len));
 
   if (len == n) {
     return S_OK;

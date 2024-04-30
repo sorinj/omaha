@@ -59,6 +59,18 @@ void AppStateWaitingToInstall::Install(
   ASSERT1(app);
   ASSERT1(install_manager);
 
+  // For large files, verifying the hash of the file may take a several
+  // seconds of CPU time. The execution of the CopyAppVersionPackages function
+  // occurs under the model lock. That means that the controller can't respond
+  // to state queries initiate by the COM client, which means that state
+  // changes can't be observed while the hash verification occurs. While the
+  // hash of the file is checked, the UI appears to be stuck in a state, which
+  // may be different than this state. Calling ::Sleep here is a work around
+  // to increase the likelihood that a client polling for state changes detects
+  // this transition, and the UI displays a relevant text for the user.
+  constexpr int kWaitBeforeInstallMs = 500;
+  ::Sleep(kWaitBeforeInstallMs);
+
   CString guid;
   HRESULT hr(GetGuid(&guid));
   if (SUCCEEDED(hr)) {
@@ -73,7 +85,7 @@ void AppStateWaitingToInstall::Install(
   if (FAILED(hr)) {
     StringFormatter formatter(app->app_bundle()->display_language());
     CString message;
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_INSTALL_FAILED, &message));
     Error(app, ErrorContext(hr), message);
   }
 }

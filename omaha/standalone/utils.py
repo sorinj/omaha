@@ -6,13 +6,7 @@ allowing it to be used in both scons-based and "standard" python code.
 
 import array
 import base64
-try:
-  # Import _hashlib instead of hashlib, otherwise, when used in an Omaha build,
-  # it collides with the incompatible Scons hashlib hack in:
-  # googleclient/third_party/scons/hammer_version/scons-local/SCons/compat/_scons_hashlib.py
-  import _hashlib
-except ImportError:
-  from third_party.hashlib import _hashlib
+import hashlib
 import os
 
 
@@ -41,7 +35,7 @@ def GenerateUpdateResponseFile(target, sources, version_list, has_x64_binaries):
     arch_requirement = 'x64'
 
   manifest_content_list = [xml_header, response_header]
-  for file_index in xrange(0, len(sources), 2):
+  for file_index in range(0, len(sources), 2):
     source_manifest_path = sources[file_index]
     binary_path = sources[file_index + 1]
     size = os.stat(os.path.abspath(binary_path)).st_size
@@ -49,7 +43,7 @@ def GenerateUpdateResponseFile(target, sources, version_list, has_x64_binaries):
     installer_file = open(os.path.abspath(binary_path), mode='rb')
     data.fromfile(installer_file, size)
     installer_file.close()
-    sha256 = _hashlib.openssl_sha256()
+    sha256 = hashlib.sha256()
     sha256.update(data)
     hash_value = sha256.hexdigest()
 
@@ -72,7 +66,7 @@ def GenerateUpdateResponseFile(target, sources, version_list, has_x64_binaries):
     resp = manifest_content[response_body_start_index:response_body_end_index]
     resp = resp.replace('${INSTALLER_SIZE}', str(size))
     resp = resp.replace('${INSTALLER_HASH_SHA256}', hash_value)
-    resp = resp.replace('${INSTALLER_VERSION}', version_list[file_index/2])
+    resp = resp.replace('${INSTALLER_VERSION}', version_list[int(file_index/2)])
     resp = resp.replace('${ARCH_REQUIREMENT}', arch_requirement)
     manifest_content_list.append(resp)
   manifest_content_list.append(response_footer)

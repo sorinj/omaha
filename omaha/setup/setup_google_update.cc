@@ -15,9 +15,7 @@
 
 #include "omaha/setup/setup_google_update.h"
 
-#include <msi.h>
 #include <atlpath.h>
-#include <set>
 #include <vector>
 #include "base/basictypes.h"
 #include "omaha/base/app_util.h"
@@ -173,8 +171,8 @@ HRESULT SetupGoogleUpdate::FinishInstall() {
 
     // Fall through for installs. Omaha will attempt to install using the
     // in-proc mode. Not installing the launch mechanisms does mean that Omaha
-    // will not be able to update itself or the product. But OneClick and
-    // Handoffs should continue to work.
+    // will not be able to update itself or the product. But  Handoffs should
+    // continue to work.
     //
     // extra_code1_ contains the HRESULT from the Scheduled Task install
     // failure, but it is more useful to send the service install failure in the
@@ -182,13 +180,6 @@ HRESULT SetupGoogleUpdate::FinishInstall() {
     // install failure.
     extra_code1_ = hr;
   }
-
-  // Reset kRegValueIsMSIHelperRegistered so that the MSI helper is registered
-  // on the next UA run.
-  const TCHAR* key_name = is_machine_ ? MACHINE_REG_UPDATE : USER_REG_UPDATE;
-  VERIFY1(SUCCEEDED(RegKey::SetValue(key_name,
-                                     kRegValueIsMSIHelperRegistered,
-                                     static_cast<DWORD>(0))));
 
   hr = RegisterOrUnregisterCOMLocalServer(true);
   if (FAILED(hr)) {
@@ -199,13 +190,11 @@ HRESULT SetupGoogleUpdate::FinishInstall() {
 
   ASSERT1(SUCCEEDED(VerifyCOMLocalServerRegistration(is_machine_)));
 
-  // We would prefer to uninstall previous versions last, but the web plugin
-  // requires that the old plugin is uninstalled before installing the new one.
-  VERIFY1(SUCCEEDED(UninstallPreviousVersions()));
+  VERIFY_SUCCEEDED(UninstallPreviousVersions());
 
   // Set the LastOSVersion to the currently installed OS version.  This is used
   // by the core to determine when an OS upgrade has occurred.
-  VERIFY1(SUCCEEDED(app_registry_utils::SetLastOSVersion(is_machine_, NULL)));
+  VERIFY_SUCCEEDED(app_registry_utils::SetLastOSVersion(is_machine_, NULL));
 
   // Writing this value indicates that this Omaha version was successfully
   // installed. This is an artifact of Omaha 2 when pv was set earlier in Setup.
@@ -224,8 +213,8 @@ HRESULT SetupGoogleUpdate::FinishInstall() {
 
   // The LastCodeRedCheck value is cleaned up on every install/update of Omaha.
   const ConfigManager* cm = ConfigManager::Instance();
-  VERIFY1(SUCCEEDED(RegKey::DeleteValue(
-      cm->registry_update(is_machine_), kRegValueLastCodeRedCheck)));
+  VERIFY_SUCCEEDED(RegKey::DeleteValue(
+      cm->registry_update(is_machine_), kRegValueLastCodeRedCheck));
 
   return S_OK;
 }
@@ -310,19 +299,19 @@ HRESULT SetupGoogleUpdate::InstallRegistryValues() {
     ASSERT1(false);
     omaha_name = kAppName;
   }
-  VERIFY1(SUCCEEDED(RegKey::SetValue(omaha_clients_key_path,
+  VERIFY_SUCCEEDED(RegKey::SetValue(omaha_clients_key_path,
                                      kRegValueAppName,
-                                     omaha_name)));
+                                     omaha_name));
 
   // Set pv in ClientState for consistency. Optional, so ignore errors.
   const CString omaha_client_state_key_path =
       cm->registry_client_state_goopdate(is_machine_);
-  VERIFY1(SUCCEEDED(RegKey::SetValue(omaha_client_state_key_path,
+  VERIFY_SUCCEEDED(RegKey::SetValue(omaha_client_state_key_path,
                                      kRegValueProductVersion,
-                                     this_version_)));
+                                     this_version_));
 
   if (is_machine_) {
-    VERIFY1(SUCCEEDED(goopdate_utils::EnableSEHOP(true)));
+    VERIFY_SUCCEEDED(goopdate_utils::EnableSEHOP(true));
   }
 
   return S_OK;
@@ -404,10 +393,10 @@ void SetupGoogleUpdate::UninstallLaunchMechanisms() {
   } else {
     // We only need to do this in case of the user goopdate, as
     // there is no machine Run at startup installation.
-    VERIFY1(SUCCEEDED(ConfigureUserRunAtStartup(false)));  // delete entry
+    VERIFY_SUCCEEDED(ConfigureUserRunAtStartup(false));  // delete entry
   }
 
-  VERIFY1(SUCCEEDED(scheduled_task_utils::UninstallGoopdateTasks(is_machine_)));
+  VERIFY_SUCCEEDED(scheduled_task_utils::UninstallGoopdateTasks(is_machine_));
 }
 
 HRESULT SetupGoogleUpdate::InstallScheduledTask() {
@@ -511,10 +500,11 @@ HRESULT SetupGoogleUpdate::InstallUserLaunchMechanisms() {
 // Sets a value in the Run key in the user registry to start the core.
 HRESULT SetupGoogleUpdate::ConfigureUserRunAtStartup(bool install) {
   SETUP_LOG(L3, (_T("SetupGoogleUpdate::ConfigureUserRunAtStartup")));
-  // Always send false argument as this method is only called for user
-  // goopdate installs.
-  CString core_cmd = BuildCoreProcessCommandLine();
-  return ConfigureRunAtStartup(USER_KEY_NAME, kRunValueName, core_cmd, install);
+
+  return ConfigureRunAtStartup(USER_KEY_NAME,
+                               kRunValueName,
+                               BuildCoreProcessCommandLine(),
+                               install);
 }
 
 HRESULT SetupGoogleUpdate::RegisterOrUnregisterCOMLocalServer(bool reg) {
@@ -533,115 +523,6 @@ HRESULT SetupGoogleUpdate::RegisterOrUnregisterCOMLocalServer(bool reg) {
   return S_OK;
 }
 
-// Assumes that the MSI is in the current directory.
-// To debug MSI failures, use the following statement:
-// ::MsiEnableLog(INSTALLLOGMODE_VERBOSE, _T("C:\\msi.log"), NULL);
-HRESULT SetupGoogleUpdate::InstallMsiHelper() {
-  SETUP_LOG(L3, (_T("[SetupGoogleUpdate::InstallMsiHelper]")));
-  if (!is_machine_) {
-    return S_OK;
-  }
-
-  ++metric_setup_helper_msi_install_total;
-  HighresTimer metrics_timer;
-
-  const CPath msi_path(BuildSupportFileInstallPath(kHelperInstallerName));
-  ASSERT1(File::Exists(msi_path));
-
-  // Setting INSTALLUILEVEL_NONE causes installation to be silent and not
-  // create a restore point.
-  ::MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
-
-  // Try a normal install.
-  UINT res = ::MsiInstallProduct(msi_path, kMsiSuppressAllRebootsCmdLine);
-  if (ERROR_PRODUCT_VERSION == res) {
-    // The product may already be installed. Force a reinstall of everything.
-    SETUP_LOG(L3, (_T("[ERROR_PRODUCT_VERSION returned - forcing reinstall]")));
-    CString force_install_cmd_line;
-    SafeCStringFormat(&force_install_cmd_line,
-                      _T("REINSTALL=ALL REINSTALLMODE=vamus %s"),
-                      kMsiSuppressAllRebootsCmdLine);
-    res = ::MsiInstallProduct(msi_path, force_install_cmd_line);
-  }
-
-  HRESULT hr = HRESULT_FROM_WIN32(res);
-  if (FAILED(hr)) {
-    SETUP_LOG(L1, (_T("[MsiInstallProduct failed][0x%08x][%u]"), hr, res));
-    return hr;
-  }
-
-  metric_setup_helper_msi_install_ms.AddSample(metrics_timer.GetElapsedMs());
-  ++metric_setup_helper_msi_install_succeeded;
-  return S_OK;
-}
-
-// The MSI is uninstalled.
-// TODO(omaha): Make sure this works after deleting the MSI.
-HRESULT SetupGoogleUpdate::UninstallMsiHelper() {
-  SETUP_LOG(L3, (_T("[SetupGoogleUpdate::UninstallMsiHelper]")));
-  if (!is_machine_) {
-    return S_OK;
-  }
-
-  // Setting INSTALLUILEVEL_NONE causes installation to be silent and not
-  // create a restore point.
-  ::MsiSetInternalUI(INSTALLUILEVEL_NONE, NULL);
-
-  // MSDN says that eInstallState must be INSTALLSTATE_DEFAULT in order for the
-  // command line to be used. Therefore, instead of using INSTALLSTATE_ABSENT
-  // to uninstall, we must pass REMOVE=ALL in the command line.
-  CString uninstall_cmd_line;
-  SafeCStringFormat(&uninstall_cmd_line, _T("REMOVE=ALL %s"),
-                    kMsiSuppressAllRebootsCmdLine);
-  UINT res = ::MsiConfigureProductEx(kHelperInstallerProductGuid,
-                                     INSTALLLEVEL_DEFAULT,
-                                     INSTALLSTATE_DEFAULT,
-                                     uninstall_cmd_line);
-
-  // Ignore the product not currently installed result.
-  if ((ERROR_SUCCESS != res) && (ERROR_UNKNOWN_PRODUCT != res)) {
-    HRESULT hr = HRESULT_FROM_WIN32(res);
-    if (FAILED(hr)) {
-      SETUP_LOG(L1, (_T("[MsiInstallProduct failed][0x%08x][%u]"), hr, res));
-      return hr;
-    }
-  }
-
-  return S_OK;
-}
-
-HRESULT SetupGoogleUpdate::InstallBrowserPlugins() {
-  SETUP_LOG(L3, (_T("[SetupGoogleUpdate::InstallBrowserPlugins]")));
-  ASSERT1(have_called_uninstall_previous_versions_);
-  // Failure of registration of optional components is acceptable in release
-  // builds.
-  HRESULT hr = S_OK;
-
-  CString plugin_path =
-      BuildSupportFileInstallPath(UPDATE_PLUGIN_FILENAME);
-  hr = RegisterDll(plugin_path);
-  if (FAILED(hr)) {
-    SETUP_LOG(L1, (_T("[Register plugin DLL failed][0x%08x]"), hr));
-  }
-
-  return hr;
-}
-
-HRESULT SetupGoogleUpdate::UninstallBrowserPlugins() {
-  SETUP_LOG(L3, (_T("[SetupGoogleUpdate::UninstallBrowserPlugins]")));
-  // Unregistration. Failure is acceptable in release builds.
-  HRESULT hr = S_OK;
-
-  CString plugin_path =
-      BuildSupportFileInstallPath(UPDATE_PLUGIN_FILENAME);
-  hr = UnregisterDll(plugin_path);
-  if (FAILED(hr)) {
-    SETUP_LOG(L1, (_T("[Unregister plugin DLL failed][0x%08x]"), hr));
-  }
-
-  return hr;
-}
-
 CString SetupGoogleUpdate::BuildSupportFileInstallPath(
     const CString& filename) const {
   SETUP_LOG(L3, (_T("[SetupGoogleUpdate::BuildSupportFileInstallPath][%s]"),
@@ -658,7 +539,9 @@ CString SetupGoogleUpdate::BuildCoreProcessCommandLine() const {
   CPath full_file_path(goopdate_utils::BuildInstallDirectory(
       is_machine_, GetVersionString()));
   VERIFY1(full_file_path.Append(kOmahaCoreFileName));
-  return full_file_path;
+  CString core_command_line(full_file_path);
+  EnclosePath(&core_command_line);
+  return core_command_line;
 }
 
 HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
@@ -666,8 +549,8 @@ HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
   have_called_uninstall_previous_versions_ = true;
 #endif
 
-  VERIFY1(SUCCEEDED(
-      scheduled_task_utils::UninstallLegacyGoopdateTasks(is_machine_)));
+  VERIFY_SUCCEEDED(
+      scheduled_task_utils::UninstallLegacyGoopdateTasks(is_machine_));
 
   CString install_path(
       is_machine_ ? ConfigManager::Instance()->GetMachineGoopdateInstallDir() :
@@ -695,14 +578,12 @@ HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
     return HRESULT_FROM_WIN32(err);
   }
 
-  // The following subdirectories are not deleted here.
-  std::set<CString> excluded_directories = {
-    _T(".."),
-    _T("."),
-    this_version_,
-    DOWNLOAD_DIR_NAME,  // Managed by DownloadManager::Initialize().
-    INSTALL_WORKING_DIR_NAME,  // Managed by InstallManager::InstallManager().
-  };
+  // The download and install directories are left alone here. They are cleaned
+  // up by DownloadManager::Initialize() and InstallManager::InstallManager().
+  CPath download_dir(OMAHA_REL_DOWNLOAD_STORAGE_DIR);
+  download_dir.StripPath();
+  CPath install_dir(OMAHA_REL_INSTALL_WORKING_DIR);
+  install_dir.StripPath();
 
   BOOL found_next = TRUE;
   for (; found_next; found_next = ::FindNextFile(get(find_handle),
@@ -714,7 +595,12 @@ HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
       if (_tcsicmp(file_data.cFileName, kOmahaShellFileName)) {
         DeleteBeforeOrAfterReboot(file_or_directory);
       }
-    } else if (!excluded_directories.count(file_data.cFileName)) {
+    } else if (_tcscmp(file_data.cFileName, _T("..")) &&
+               _tcscmp(file_data.cFileName, _T(".")) &&
+               _tcsicmp(file_data.cFileName, this_version_) &&
+               _tcsicmp(file_data.cFileName, download_dir) &&
+               _tcsicmp(file_data.cFileName, install_dir) &&
+               !(file_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
       // Unregister the previous version OneClick if it exists. Ignore
       // failures. The file is named npGoogleOneClick*.dll.
       CPath old_oneclick(file_or_directory);
@@ -725,7 +611,7 @@ HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
       if (found_oneclick) {
         CPath old_oneclick_file(file_or_directory);
         VERIFY1(old_oneclick_file.Append(old_oneclick_file_data.cFileName));
-        VERIFY1(SUCCEEDED(UnregisterDll(old_oneclick_file)));
+        VERIFY_SUCCEEDED(UnregisterDll(old_oneclick_file));
       }
 
       // Unregister the previous version of the plugin if it exists. Ignore
@@ -738,7 +624,7 @@ HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
       if (found_plugin) {
         CPath old_plugin_file(file_or_directory);
         VERIFY1(old_plugin_file.Append(old_plugin_file_data.cFileName));
-        VERIFY1(SUCCEEDED(UnregisterDll(old_plugin_file)));
+        VERIFY_SUCCEEDED(UnregisterDll(old_plugin_file));
       }
 
       // Delete entire sub-directory.
@@ -769,12 +655,6 @@ HRESULT SetupGoogleUpdate::UninstallPreviousVersions() {
 void SetupGoogleUpdate::Uninstall() {
   OPT_LOG(L1, (_T("[SetupGoogleUpdate::Uninstall]")));
 
-  HRESULT hr = UninstallBrowserPlugins();
-  if (FAILED(hr)) {
-    SETUP_LOG(LW, (_T("[UninstallBrowserPlugins failed][0x%08x]"), hr));
-    ASSERT1(HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND) == hr);
-  }
-
   // If running from the installed location instead of a temporary location,
   // we assume that Omaha had been properly installed and can verify the COM
   // registration.
@@ -782,18 +662,12 @@ void SetupGoogleUpdate::Uninstall() {
     ASSERT1(SUCCEEDED(VerifyCOMLocalServerRegistration(is_machine_)));
   }
 
-  hr = RegisterOrUnregisterCOMLocalServer(false);
+  HRESULT hr = RegisterOrUnregisterCOMLocalServer(false);
   if (FAILED(hr)) {
     SETUP_LOG(LW,
               (_T("[RegisterOrUnregisterCOMLocalServer failed][0x%08x]"), hr));
     ASSERT1(GOOGLEUPDATE_E_DLL_NOT_FOUND == hr ||
             HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) == hr);
-  }
-
-  hr = UninstallMsiHelper();
-  if (FAILED(hr)) {
-    SETUP_LOG(L1, (_T("[UninstallMsiHelper failed][0x%08x]"), hr));
-    ASSERT1(HRESULT_FROM_WIN32(ERROR_INSTALL_SERVICE_FAILURE) == hr);
   }
 
   UninstallLaunchMechanisms();
@@ -808,7 +682,7 @@ HRESULT SetupGoogleUpdate::DeleteRegistryKeys() {
   OPT_LOG(L3, (_T("[SetupGoogleUpdate::DeleteRegistryKeys]")));
 
   if (is_machine_) {
-    VERIFY1(SUCCEEDED(goopdate_utils::EnableSEHOP(false)));
+    VERIFY_SUCCEEDED(goopdate_utils::EnableSEHOP(false));
   }
 
   CString root_key = ConfigManager::Instance()->registry_update(is_machine_);
@@ -834,7 +708,7 @@ HRESULT SetupGoogleUpdate::DeleteRegistryKeys() {
   ASSERT1(num_keys == static_cast<int>(sub_keys.size()));
   // Delete all the sub keys of the root key.
   for (int i = 0; i < num_keys; ++i) {
-    VERIFY1(SUCCEEDED(root.RecurseDeleteSubKey(sub_keys[i])));
+    VERIFY_SUCCEEDED(root.RecurseDeleteSubKey(sub_keys[i]));
   }
 
   // Now delete all the values of the root key.
@@ -862,11 +736,11 @@ HRESULT SetupGoogleUpdate::DeleteRegistryKeys() {
   }
 
   for (size_t i = 0; i < value_names.size(); ++i) {
-    VERIFY1(SUCCEEDED(root.DeleteValue(value_names[i])));
+    VERIFY_SUCCEEDED(root.DeleteValue(value_names[i]));
   }
 
   if (0 == root.GetValueCount() && 0 == root.GetSubkeyCount()) {
-    VERIFY1(SUCCEEDED(RegKey::DeleteKey(root_key, false)));
+    VERIFY_SUCCEEDED(RegKey::DeleteKey(root_key, false));
   }
 
   return S_OK;

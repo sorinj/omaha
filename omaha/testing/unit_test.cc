@@ -14,20 +14,24 @@
 // ========================================================================
 
 #include "testing/unit_test.h"
+
 #include "omaha/base/app_util.h"
 #include "omaha/base/constants.h"
 #include "omaha/base/error.h"
 #include "omaha/base/path.h"
 #include "omaha/base/process.h"
 #include "omaha/base/reg_key.h"
+#include "omaha/base/scope_guard.h"
 #include "omaha/base/string.h"
 #include "omaha/base/system.h"
-#include "omaha/base/utils.h"
 #include "omaha/base/user_info.h"
+#include "omaha/base/utils.h"
 #include "omaha/base/vistautil.h"
 #include "omaha/common/command_line.h"
 #include "omaha/common/command_line_builder.h"
+#include "omaha/common/config_manager.h"
 #include "omaha/common/const_goopdate.h"
+#include "omaha/common/const_group_policy.h"
 #include "omaha/third_party/smartany/scoped_any.h"
 
 namespace omaha {
@@ -64,7 +68,7 @@ CString GetLocalAppDataPath() {
 }
 
 CString GetGoogleUserPath() {
-  return GetLocalAppDataPath() + SHORT_COMPANY_NAME + _T("\\");
+  return GetLocalAppDataPath() + PATH_COMPANY_NAME + _T("\\");
 }
 
 // TODO(omaha): make GetGoogleUpdateUserPath and GetGoogleUpdateMachinePath
@@ -76,7 +80,7 @@ CString GetGoogleUpdateUserPath() {
 CString GetGoogleUpdateMachinePath() {
   CString program_files;
   GetFolderPath(CSIDL_PROGRAM_FILES, &program_files);
-  return program_files + _T("\\") + SHORT_COMPANY_NAME
+  return program_files + _T("\\") + PATH_COMPANY_NAME
                         + _T("\\") + PRODUCT_NAME;
 }
 
@@ -366,6 +370,25 @@ void CreateFiles(const TCHAR* parent_dir,
                                            NULL));
     EXPECT_NE(INVALID_HANDLE_VALUE, get(file_handle));
   }
+}
+
+HRESULT SetPolicy(const TCHAR* policy_name, DWORD value) {
+  ON_SCOPE_EXIT_OBJ(*ConfigManager::Instance(),
+                    &ConfigManager::LoadPolicies,
+                    true);
+  return RegKey::SetValue(kRegKeyGoopdateGroupPolicy, policy_name, value);
+}
+
+HRESULT SetPolicyString(const TCHAR* policy_name, const CString& value) {
+  ON_SCOPE_EXIT_OBJ(*ConfigManager::Instance(),
+                    &ConfigManager::LoadPolicies,
+                    true);
+  return RegKey::SetValue(kRegKeyGoopdateGroupPolicy, policy_name, value);
+}
+
+void ClearGroupPolicies() {
+  RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
+  ConfigManager::Instance()->LoadPolicies(true);
 }
 
 }  // namespace omaha

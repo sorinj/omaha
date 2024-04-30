@@ -32,19 +32,9 @@ namespace omaha {
 #define STR_SIZE(str) (arraysize(str)-1)  // number of characters in char array (only for single-byte string literals!!!)
 #define TSTR_SIZE(tstr) (arraysize(tstr)-1)  // like STR_SIZE but works on _T("string literal") ONLY!!!
 
-#define kEllipsis L".."
-
 // The number of replacements matches we expect, before we start allocating extra memory
 // to process it. This is an optimizing constant
-#define kExpectedMaxReplaceMatches 100
-
-// TODO(omaha): above each of these function names, we should
-// define what we expect the implementation to do. that way,
-// implementers will know what is desired. an example would probably
-// make things easiest.
-CString AbbreviateString (const CString & title, int32 max_len);
-CString AbbreviateUri (const CString & uri, int32 max_len);
-CString NormalizeUri (const CString & uri);
+constexpr size_t kExpectedMaxReplaceMatches = 100;
 
 // removes "http://", "ftp://", "mailto:" or "file://" (note that the "file" protocol is
 // like: "file:///~/calendar", this method removes only the first two slashes
@@ -53,76 +43,11 @@ CString RemoveInternetProtocolHeader (const CString& url);
 // Converts a file:// URI to a valid Windows path.
 HRESULT ConvertFileUriToLocalPath(const CString& uri, CString* path_out);
 
-void RemoveFromStart (CString & s, const TCHAR* remove, bool ignore_case);
-void RemoveFromEnd (CString & s, const TCHAR* remove);
-
-// Limit string to max length, truncating and adding ellipsis if needed
-// Attempts to not leave a partial word at the end, unless min_len is reached
-CString ElideIfNeeded (const CString & input_string, int max_len, int min_len);
-
-// The ability to clean up a string for relevant target audiences. Add flags accordingly
-
-// Sanitizes for insertion in an HTML document, uses the basic literals [<>&]
-#define kSanHtml 0x1
-
-// XML is the HTML replacements, and a few more
-#define kSanXml (kSanHtml | 0x2)
-
-// JavaScript has a separate set of encodings [which is a superset of HTML replacements]
-#define kSanJs (kSanHtml | 0x4)
-
-// For input fields on HTML documents
-#define kSanHtmlInput 0x8
-
 // TODO(omaha): be consistent on use of int/uint32/int32 for lengths
 
 // The input length of the string does not include the null terminator.
 // Caller deletes the returned buffer.
 WCHAR *ToWide (const char *s, int len);
-
-// returns pointer to data if found otherwise NULL
-const byte *BufferContains (const byte *buf, uint32 buf_len, const byte *data, uint32 data_len);
-
-// Given a string, 'protect' the characters that are invalid for a given mode
-// For instance, kSanHtml will replace < with the HTML literal equivalent
-// If kSanHtml is used, and bold_periods is true, then periods used for url abbreviation are bolded.
-// NOTE: If you call AbbreviateLinkForDisplay before this function, then there might be periods
-// used for abbreviation.  BoldAbbreviationPeriods should be called after HighlightTerms.
-CString SanitizeString(const CString & in, DWORD mode);
-
-// Bolds the periods used for abbreviation.  Call this after HighlightTerms.
-CString BoldAbbreviationPeriods(const CString & in);
-
-// Unencode a URL encoded string
-CString Unencode(const CString & input);
-
-CString GetTextInbetween(const CString &input, const CString &start, const CString &end);
-
-// Given a ? seperated string, extract a particular segment, and URL-Unencode it
-CString GetParam(const CString & input, const CString & key);
-
-// Given an XML style string, extract the contents of a <INPUT>...</INPUT> pair
-CString GetField (const CString & input, const CString & field);
-
-// Finds a whole word match in the query, followed by a ":".
-// If not found, return -1.
-//
-// Note: this is case sensitive.
-int FindWholeWordMatch (const CString &query,
-  const CString &word_to_match,
-  const bool end_with_colon,
-  const int index_begin);
-
-// Do whole-word replacement in "str".
-// This does not do partial matches (unlike CString::Replace),
-//   e.g.  CString::Replace will replace "ie" within "pie" and
-// this function will not.
-//
-// Note: this is case sensitive.
-void ReplaceWholeWord (const CString &string_to_replace,
-  const CString &replacement,
-  const bool trim_whitespace,
-  CString *str);
 
 // Convert Wide to ANSI directly. Use only when it is all ANSI
 CStringA WideToAnsiDirect(const CString & in);
@@ -155,13 +80,6 @@ BOOL AnsiToWideString(const char *from, int length, UINT codepage, CString *to);
 // Convert char to Wchar directly
 CString AnsiToWideString(const char *from, int length);
 
-// these functions untested
-// they should not be used unless tested
-// HRESULT AnsiToUTF8 (char * src, int src_len, char * dest, int *dest_len);
-// HRESULT UTF8ToAnsi (char * src, int src_len, char * dest, int *dest_len);
-// HRESULT UCS2ToUTF8 (LPCWSTR src, int src_len, char * dest, int *dest_len);
-// HRESULT UTF8ToUCS2 (char * src, int src_len, LPWSTR dest, int *dest_len);
-
 // "Absolute" is perhaps not the right term, this normalizes the Uri
 // given http://www.google.com changes to correct http://www.google.com/
 // given http://www.google.com// changes to correct http://www.google.com/
@@ -182,24 +100,6 @@ CString GetUriHostNameHostOnly(const CString& uri, bool strip_leading_www);
 
 const char *stristr(const char *string, const char *pattern);
 const WCHAR *stristrW(const WCHAR *string, const WCHAR *pattern);
-const WCHAR *strstrW(const WCHAR *string, const WCHAR *pattern);
-
-// Add len_to_add to len_so_far, assuming that if it exceeds the
-// length of the line, it will word wrap onto the next line.  Returns
-// the total length of all the lines summed together.
-float GetLenWithWordWrap (const float len_so_far,
-  const float len_to_add,
-  const uint32 len_line);
-
-// ----------------------------------------------------------------------
-// QuotedPrintableUnescape()
-//    Copies "src" to "dest", rewriting quoted printable escape sequences
-//    =XX to their ASCII equivalents. src is not null terminated, instead
-//    specify len. I recommend that slen<len_dest, but we honour len_dest
-//    anyway.
-//    RETURNS the length of dest.
-// ----------------------------------------------------------------------
-int QuotedPrintableUnescape(const WCHAR *src, int slen, WCHAR *dest, int len_dest);
 
 // Return the length to use for the output buffer given to the base64 escape
 // routines. Make sure to use the same value for do_padding in both.
@@ -221,7 +121,6 @@ int CalculateBase64EscapedLen(int input_len);
 //    to escape them.  It also has an extra parameter "do_padding",
 //    which when set to false will prevent padding with "=".
 // ----------------------------------------------------------------------
-int Base64Escape(const char *src, int slen, char *dest, int szdest);
 int WebSafeBase64Escape(const char *src, int slen, char *dest,
                         int szdest, bool do_padding);
 void WebSafeBase64Escape(const CStringA& src, CStringA* dest);
@@ -243,6 +142,7 @@ void WebSafeBase64Escape(const char *src, int szsrc,
 //    destination buffer or -1 in case of a decoding error.
 // ----------------------------------------------------------------------
 int Base64Unescape(const char *src, int slen, char *dest, int len_dest);
+int Base64Unescape(const CStringA& src, CStringA* dest);
 int WebSafeBase64Unescape(const char *src, int slen, char *dest, int szdest);
 
 #ifdef UNICODE
@@ -254,20 +154,9 @@ int WebSafeBase64Unescape(const char *src, int slen, char *dest, int szdest);
 bool IsSpaceW(WCHAR c);
 bool IsSpaceA(char c);
 
-// Remove all leading and trailing whitespace from s.
-// Returns the new length of the string (not including 0-terminator)
-int TrimCString(CString &s);
-int Trim(TCHAR *s);
-
 // Trims all characters in the delimiter string from both ends of the
 // string s
 void TrimString(CString& s, const TCHAR* delimiters);
-
-// Strip the first token from the front of argument s.  A token is a
-// series of consecutive non-blank characters - unless the first
-// character is a double-quote ("), in that case the token is the full
-// quoted string
-CString StripFirstQuotedToken(const CString& s);
 
 // A block of text to separate lines, and back
 void TextToLines(const CString& text, const TCHAR* delimiter, std::vector<CString>* lines);
@@ -276,12 +165,6 @@ void LinesToText(const std::vector<CString>& lines, const TCHAR* delimiter, CStr
 
 // Make a CString lower case
 void MakeLowerCString(CString & s);
-
-// Clean up the string: replace all whitespace with spaces, and
-// replace consecutive spaces with one.
-// Returns the new length of the string (not including 0-terminator)
-int CleanupWhitespaceCString(CString &s);
-int CleanupWhitespace(TCHAR *s);
 
 int HexDigitToInt (WCHAR c);
 bool IsHexDigit (WCHAR c);
@@ -334,12 +217,6 @@ CString sizet_to_str(const size_t & i);
 CString itostr(const int i);
 CString itostr(const uint32 i);
 
-// converts a large number to an approximate value, like "1.2G" or "900M"
-// base_ten = true if based on powers of 10 (like disk space) otherwise based
-// on powers of two.  power = 0 for *10^0, 1 for *10^3 or 2^10, 2 for *10^6
-// or 2^20, and 3 for *10^9 or 2^30, in other words: no units, K, M, or G.
-CString String_LargeIntToApproximateString(uint64 value, bool base_ten, int* power);
-
 // converts a string to an  int
 // Does not check for overflow
 int32 String_StringToInt(const TCHAR * str);
@@ -367,11 +244,6 @@ TCHAR String_DigitToChar(unsigned int n);
 // Returns true if an identifier character: letter, digit, or "_"
 bool String_IsIdentifierChar(const TCHAR c);
 
-// Returns true if the string has letters in it.
-// This is used by the keyword extractor to downweight numbers,
-// IDs (sequences of numbers like social security numbers), etc.
-bool String_HasAlphabetLetters (const TCHAR *str);
-
 // Return the index of the first occurrence of s2 in s1, or -1 if none.
 int String_FindString(const TCHAR *s1, const TCHAR *s2);
 int String_FindString(const TCHAR *s1, const TCHAR *s2, int start_pos);
@@ -381,14 +253,7 @@ int String_FindChar(const TCHAR *str, const TCHAR c);
 // start from index start_pos
 int String_FindChar(const TCHAR *str, const TCHAR c, int start_pos);
 
-// Return the index of the first occurrence of c in string, or -1 if none.
-int String_ReverseFindChar(const TCHAR * str, TCHAR c);
-
 bool String_Contains(const TCHAR *s1, const TCHAR *s2);
-
-// Replace old_char with new_char in str.
-void String_ReplaceChar(TCHAR *str, TCHAR old_char, TCHAR new_char);
-void String_ReplaceChar(CString & str, TCHAR old_char, TCHAR new_char);
 
 // Append the given character to the string if it doesn't already end with it.
 // There must be room in the string to append the character if necessary.
@@ -410,34 +275,12 @@ int ReplaceCString (CString & src, const TCHAR *from, unsigned int from_len,
 // on memory allocation error, returns the original string
 int ReplaceCString (CString & src, const TCHAR *from, const TCHAR *to);
 
-// Functions on arrays of strings
-
-// Returns true iff s is in the array strings (case-insensitive compare)
-bool String_MemberOf(const TCHAR* const* strings, const TCHAR* s);
-// Returns index of s in the array of strings (or -1 for missing) (case-insensitive compare)
-int String_IndexOf(const TCHAR* const* strings, const TCHAR* s);
-
 // Serializes a time64 to a string, and then loads it out again, this string it not for human consumption
 time64 StringToTime(const CString & time);
 CString TimeToString(const time64 & time);
 
-// looks for string A followed by any number of spaces/tabs followed by string b
-// returns starting position of a if found, NULL if not
-// case insensitive
-const TCHAR *FindStringASpaceStringB (const TCHAR *s, const TCHAR *a, const TCHAR *b);
-
 bool IsAlphaA (const char c);
 bool IsDigitA (const char c);
-
-// TODO(omaha): deprecate since we have secure CRT now.
-// dest_buffer_len includes the NULL
-// always NULL terminates
-// dest must be a valid string with length < dest_buffer_len
-void SafeStrCat (TCHAR *dest, const TCHAR *src, int dest_buffer_len);
-
-const TCHAR *ExtractNextDouble (const TCHAR *s, double *f);
-
-TCHAR *String_PathFindExtension(const TCHAR *path);
 
 inline TCHAR Char_ToLower(TCHAR c) {
   const TCHAR* result = ::CharLower(reinterpret_cast<TCHAR*>(c));
@@ -450,8 +293,6 @@ int String_ToLowerChar(int c);
 
 // Replacement for the CRT tolower(c)
 char String_ToLowerCharAnsi(char c);
-
-bool String_PathRemoveFileSpec(TCHAR *path);
 
 // Escapes and unescapes strings (shlwapi-based implementation).
 // The indended usage for these APIs is escaping strings to make up
@@ -470,14 +311,11 @@ HRESULT StringUnescape(const CString& str_in, CString* str_out);
 // Tests for overflow and non-int strings.
 bool String_StringToDecimalIntChecked(const TCHAR* str, int* value);
 
-// Converts CLSID to a string.
-bool CLSIDToCString(const GUID& guid, CString* str);
-
 // Converts a string to a bool.
 HRESULT String_StringToBool(const TCHAR* str, bool* value);
 
 // Convert boolean to its string representation.
-const TCHAR* const String_BoolToString(bool value);
+const TCHAR* String_BoolToString(bool value);
 
 // Similar to ATL::CStringT::Replace() except that it ignores case.
 CString String_ReplaceIgnoreCase(const CString& string,
@@ -506,15 +344,6 @@ CString BytesToHex(const uint8* bytes, size_t num_bytes);
 // Converts a vector of bytes to a hex string.
 CString BytesToHex(const std::vector<uint8>& bytes);
 
-void JoinStrings(const std::vector<CString>& components,
-                 const TCHAR* delim,
-                 CString* result);
-
-void JoinStringsInArray(const TCHAR* components[],
-                        int num_components,
-                        const TCHAR* delim,
-                        CString* result);
-
 // Formats the specified message ID.
 // It is similar to CStringT::FormatMessage() but it returns an empty string
 // instead of throwing when the message ID cannot be loaded.
@@ -542,18 +371,6 @@ void a2b_hex(const char* from, unsigned char* to, size_t num);
 void a2b_hex(const char* from, char* to, size_t num);
 void a2b_hex(const char* from, std::string* to, size_t num);
 std::string a2b_hex(const std::string& a);
-
-// ----------------------------------------------------------------------
-// a2b_bin()
-//  Description: Ascii-to-Binary binary conversion.  This converts
-//        a.size() binary characters (ascii '0' or '1') to
-//        ceil(a.size()/8) bytes of binary data.  The first character is
-//        considered the most significant if byte_order_msb is set.  a is
-//        considered to be padded with trailing 0s if its size is not a
-//        multiple of 8.
-//        Return value: ceil(a.size()/8) bytes of binary data
-// ----------------------------------------------------------------------
-std::string a2b_bin(const std::string& a, bool byte_order_msb);
 
 // ----------------------------------------------------------------------
 // b2a_hex()

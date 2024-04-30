@@ -32,7 +32,7 @@ void BuildRequest(const App* app,
     return;
   }
 
-  if (!app->is_eula_accepted()) {
+  if (!app->is_eula_accepted() && !app->app_bundle()->is_offline_install()) {
     CORE_LOG(L3, (_T("[App EULA not accepted - not including app in ping][%s]"),
                   app->app_guid_string()));
     return;
@@ -62,21 +62,21 @@ void BuildRequest(const App* app,
   request_app.cohort_hint = app->cohort().hint;
   request_app.cohort_name = app->cohort().name;
 
-  if (!app->server_install_data_index().IsEmpty()) {
-    xml::request::Data install_data = { xml::value::kInstallData,
-                                        app->server_install_data_index(),
-                                        _T("") };
-    request_app.data.push_back(install_data);
-  }
-
-  if (!app->untrusted_data().IsEmpty()) {
-    xml::request::Data untrusted_data = { xml::value::kUntrusted,
-                                          _T(""),
-                                          app->untrusted_data() };
-    request_app.data.push_back(untrusted_data);
-  }
-
   if (is_update_check) {
+    if (!app->server_install_data_index().IsEmpty()) {
+      xml::request::Data install_data = { xml::value::kInstallData,
+                                          app->server_install_data_index(),
+                                          _T("") };
+      request_app.data.push_back(install_data);
+    }
+
+    if (!app->untrusted_data().IsEmpty()) {
+      xml::request::Data untrusted_data = { xml::value::kUntrusted,
+                                            _T(""),
+                                            app->untrusted_data() };
+      request_app.data.push_back(untrusted_data);
+    }
+
     request_app.ping.active = app->did_run();
     request_app.ping.days_since_last_active_ping =
         app->days_since_last_active_ping();
@@ -94,6 +94,7 @@ void BuildRequest(const App* app,
         app->IsRollbackToTargetVersionAllowed();
     request_app.update_check.target_version_prefix =
         app->GetTargetVersionPrefix();
+    request_app.update_check.target_channel = app->GetTargetChannel();
   }
 
   request_app.ping_events = app->ping_events();

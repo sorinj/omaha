@@ -15,6 +15,7 @@
 # limitations under the License.
 # ========================================================================
 
+import binascii
 import os
 
 Import('env')
@@ -41,9 +42,6 @@ unittest_support = env.Replicate('$STAGING_DIR/unittest_support/', [
     'unittest_support/certificate-without-private-key.cer',
     'unittest_support/declaration.txt',
     'unittest_support/manifest.xml',
-
-    # Installer files used by the Install Manager unit tests.
-    'unittest_support/test_foo_v1.0.101.0.msi',
 
     # Files used by code signing and file verification tests. The string of
     # bytes in the chrome file names represent the serial of the certificate.
@@ -76,6 +74,10 @@ unittest_support = env.Replicate('$STAGING_DIR/unittest_support/', [
     # serial=14F8FDD167F92402B1570B5DC495C815
     'unittest_support/sha1_14F8FDD167F92402B1570B5DC495C815.sys',
 
+    # Omaha certificate: sha1 (11/07/2019 to 11/16/2022).
+    # serial=06aea76bac46a9e8cfe6d29e45aaf033
+    'unittest_support/sha1_06aea76bac46a9e8cfe6d29e45aaf033.sys',
+
     'unittest_support/Sha1_4c40dba5f988fae57a57d6457495f98b_and_sha2_2a9c21acaaa63a3c58a7b9322bee948d.exe',
 
     # Omaha and Chrome certificate: sha256 (12/15/2015 to 12/16/2018).
@@ -85,6 +87,11 @@ unittest_support = env.Replicate('$STAGING_DIR/unittest_support/', [
     # Omaha and Chrome certificate: sha256 (11/06/2018 to 11/17/2021).
     # serial=0c15be4a15bb0903c901b1d6c265302f
     'unittest_support/sha2_0c15be4a15bb0903c901b1d6c265302f.msi',
+
+    # Google LLC certificate sha256 valid from 07-01-2021 to 07-10-2024.
+    # thumbprint=2673ea6cc23beffda49ac715b121544098a1284c.
+    # serial=0e4418e2dede36dd2974c3443afb5ce5.
+    'unittest_support/sha2_0e4418e2dede36dd2974c3443afb5ce5.msi',
 
     # The actual Chrome setup signed with sha256 (11/06/2018 to 11/17/2021).
     # serial=0c15be4a15bb0903c901b1d6c265302f
@@ -148,6 +155,44 @@ loc_guid = 'download_cache_test/{89640431-FE64-4da8-9860-1A1085A60E13}'
 unittest_support += env.Replicate(
                         '$STAGING_DIR/unittest_support/' + loc_guid,
                         'unittest_support/%s/gears-win32-opt.msi' % loc_guid)
+
+# Create tagged MSI files for testing.
+tags = {
+  'brand-only': (None, 'brand=QAQA', None),
+  'ampersand-ending': (None, 'brand=QAQA&', None),
+  'multiple': (None,
+               ('appguid={8A69D345-D564-463C-AFF1-A69D9E530F96}&'
+                'iid={2D8C18E9-8D3A-4EFC-6D61-AE23E3530EA2}&'
+                'lang=en&browser=4&usagestats=0&appname=Google%20Chrome&'
+                'needsadmin=prefers&brand=CHMB&'
+                'installdataindex=defaultbrowser'), None),
+  'empty-key': (None, '=value&brand=QAQA', None),
+  'empty-value': (None, 'brand=', None),
+  'empty-tag': (None, '', None),
+  'invalid-marker': ('Gact2.0Foo', 'brand=QAQA', None),
+  'invalid-length': (None, 'brand=QAQA', 3000),
+  'invalid-key': (None, 'br*nd=QAQA', None),
+  'invalid-value': (None, 'brand=QA*A', None),
+  'bad-format': (None, 'brand', None),
+  'bad-format2': (None, '=======&=======&&&=&&&&0', None),
+}
+for tag_name, tag_option in tags.items():
+  unittest_support += env.OmahaCertificateTagForTesting(
+     target = '$STAGING_DIR/unittest_support/tagged_msi/GUH-%s.msi' % tag_name,
+     source = 'unittest_support/GoogleUpdateHelper.msi',
+     magic_bytes = tag_option[0],
+     tag = tag_option[1],
+     tag_length = tag_option[2])
+
+# Create branded test MSIs for install manager testing.
+_GUID_NAMESPACE = binascii.a2b_hex('BE19B3E4502845af8B3E67A99FCDCFB1')
+_WXS_TEMPLATE_NAME = '$OBJ_ROOT/testing/test_foo.wxs.xml'
+(major, minor, build, patch) = (1,0,101,0)
+version = '%d.%d.%d.%d' % (major, minor, build, patch)
+msi_base_name = 'test_foo_v' + version
+test_exe = env.OmahaBuildTestExe(version, major, minor, build, patch)
+test_msi = env.OmahaBuildTestMsi(version, _GUID_NAMESPACE, test_exe[0], _WXS_TEMPLATE_NAME, msi_base_name)
+env.Replicate('$STAGING_DIR/unittest_support', test_msi)
 
 #=============General Unit Test Dependencies===================================
 # Many unit tests rely on string resources. omaha_unittest.cc loads them but
@@ -213,7 +258,6 @@ omaha_unittest_libs = [
     'delayimp.lib',       # For delay loading
     'imagehlp.lib',
     'iphlpapi.lib',
-    'msi.lib',
     'mstask.lib',
     'netapi32.lib',
     'ole32.lib',
@@ -239,7 +283,6 @@ if omaha_unittest_env.Bit('has_device_management'):
   omaha_unittest_libs.append('$LIB_DIR/dm_proto.lib')
   omaha_unittest_env.Append(
       CPPPATH = [
-          '$GOOGLE3',
           protobuf_src_dir,
           '$TARGET_ROOT/proto_files',
       ],
@@ -256,23 +299,12 @@ if omaha_unittest_env.IsBuildingModule('plugins'):
       '$LIB_DIR/update_test_helpers.lib',
   ]
 
-if omaha_unittest_env.IsBuildingModule('recovery'):
-  omaha_unittest_libs += [
-      '$LIB_DIR/executecustomaction_lib',
-      '$LIB_DIR/repair_goopdate.lib',
-  ]
-
 if omaha_unittest_env.IsBuildingModule('enterprise'):
   omaha_unittest_libs.append('$LIB_DIR/custom_actions_test_lib.lib')
 
 omaha_unittest_libs += omaha_unittest_env.GetAllInOneUnittestLibs()
 
 omaha_unittest_env.Append(
-    CPPPATH = [
-        '$OBJ_ROOT',                        # Needed for the generated files
-        '$THIRD_PARTY/googletest/googlemock/include',
-        '$THIRD_PARTY/googletest/googletest/include',
-        ],
     CCFLAGS = [
         '/wd4100',  # unreferenced formal parameter
         '/wd4244',  # possible loss of data
@@ -353,8 +385,6 @@ unittest_base_env.ComponentLibrary(
 omaha_unittest_inputs = [
     # Base unit tests
     '../base/app_util_unittest.cc',
-    '../base/atlassert_unittest.cc',
-    '../base/atl_regexp_unittest.cc',
     '../base/browser_utils_unittest.cc',
     '../base/cgi_unittest.cc',
     '../base/command_line_parser_unittest.cc',
@@ -375,7 +405,6 @@ omaha_unittest_inputs = [
     '../base/file_unittest.cc',
     '../base/firewall_product_detection_unittest.cc',
     '../base/highres_timer_unittest.cc',
-    '../base/localization_unittest.cc',
     '../base/logging_unittest.cc',
     '../base/omaha_version_unittest.cc',
     '../base/path_unittest.cc',
@@ -448,7 +477,6 @@ omaha_unittest_inputs = [
     '../common/stats_uploader_unittest.cc',
     '../common/update_request_unittest.cc',
     '../common/url_utils_unittest.cc',
-    '../common/webplugin_utils_unittest.cc',
     '../common/web_services_client_unittest.cc',
     '../common/xml_parser_unittest.cc',
 
@@ -456,7 +484,9 @@ omaha_unittest_inputs = [
     '../crashhandler/crash_analyzer_unittest.cc',
 
     # Core unit tests
+    '../core/core_launcher.cc',
     '../core/core_unittest.cc',
+    '../core/scheduler_unittest.cc',
     '../core/system_monitor_unittest.cc',
     '../core/google_update_core_unittest.cc',
 
@@ -516,7 +546,6 @@ omaha_unittest_inputs = [
     '../recovery/client/google_update_recovery_unittest.cc',
 
     # Setup unit tests.
-    '../setup/msi_test_utils.cc',
     '../setup/setup_unittest.cc',
     '../setup/setup_files_unittest.cc',
     '../setup/setup_google_update_unittest.cc',
@@ -547,11 +576,14 @@ omaha_unittest_inputs = [
     '../third_party/chrome/files/src/base/cpu_unittest.cc',
     '../third_party/chrome/files/src/base/rand_util_unittest.cc',
     '../third_party/chrome/files/src/crypto/rsa_private_key_unittest.cc',
+    '../third_party/chrome/files/src/crypto/signature_creator_unittest.cc',
+    '../third_party/chrome/files/src/crypto/signature_verifier_win_unittest.cc',
 ]
 
 if omaha_unittest_env.Bit('has_device_management'):
   omaha_unittest_inputs += [
       '../goopdate/dm_client_unittest.cc',
+      '../goopdate/dm_messages_unittest.cc',
       '../goopdate/dm_storage_test_utils.cc',
       '../goopdate/dm_storage_unittest.cc',
   ]
@@ -561,27 +593,6 @@ if omaha_unittest_env.IsBuildingModule('mi_exe_stub'):
   omaha_unittest_inputs += [
       # Bcj2 encoder unitests.
       '../mi_exe_stub/x86_encoder/bcj2_encoder_unittest.cc',
-  ]
-
-if omaha_unittest_env.IsBuildingModule('plugins'):
-  omaha_unittest_inputs += [
-      # Plugin unit tests.
-      '../plugins/update/omaha_customization_update_apis_unittest.cc',
-      '../plugins/update/omaha_customization_update_unittest.cc',
-      '../plugins/update/activex/update3web_control_unittest.cc',
-      '../plugins/update/npapi/dispatch_host_unittest.cc',
-      '../plugins/update/npapi/npfunction_host_unittest.cc',
-      '../plugins/update/npapi/variant_utils_unittest.cc',
-      '../plugins/update/site_lock_unittest.cc',
-      '$OBJ_ROOT/plugins/update/npapi/testing/dispatch_host_test.res',
-  ]
-
-if omaha_unittest_env.IsBuildingModule('recovery'):
-  omaha_unittest_inputs += [
-      # Recovery unit tests.
-      '../recovery/repair_exe/custom_action/execute_repair_file_unittest.cc',
-      '../recovery/repair_exe/mspexecutableelevator_unittest.cc',
-      '../recovery/repair_exe/repair_goopdate_unittest.cc',
   ]
 
 if omaha_unittest_env.IsBuildingModule('enterprise'):
@@ -653,17 +664,9 @@ omaha_unittest_env.Depends(test, '$STAGING_DIR/GoogleUpdateSetup_repair.exe')
 # Customization/UI tests depend on goopdate.dll (for TypeLib/resources)
 omaha_unittest_env.Depends(test, '$TESTS_DIR/goopdate.dll')
 
-# Customization test uses update plugin DLL (npGoogleUpdate3.dll) for TypeLib.
-omaha_unittest_env.Depends(
-    test,
-    '$STAGING_DIR/%s' % env['omaha_versions_info'][0].update_plugin_filename)
-
 if env.Bit('all'):
   save_args_env = env.Clone()
   save_args_env.Append(
-      CPPPATH = [
-          '$OBJ_ROOT',    # Needed for the generated files
-          ],
       LIBS = [
           save_args_env['atls_libs'][save_args_env.Bit('debug')],
           save_args_env['crt_libs'][save_args_env.Bit('debug')],
@@ -712,7 +715,7 @@ if env.Bit('all'):
       COMPONENT_TEST_RUNNABLE=False
   )
 
-  signed_output = save_args_env.DualSignedBinary(
+  signed_output = save_args_env.SignedBinary(
       target='SaveArguments.exe',
       source=unsigned_output,
   )

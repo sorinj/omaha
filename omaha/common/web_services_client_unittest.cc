@@ -54,7 +54,7 @@ class WebServicesClientTest : public testing::Test,
     web_service_client_.reset();
   }
 
-  NetworkRequest* network_request() const {
+  NetworkRequest* GetNetworkRequest() const {
     return web_service_client_->network_request_.get();
   }
 
@@ -93,7 +93,7 @@ TEST_F(WebServicesClientTest, Send) {
   xml::response::Response response(update_response_->response());
   EXPECT_STREQ(_T("3.0"), response.protocol);
 
-  NetworkRequest* network_request(network_request());
+  NetworkRequest* network_request = GetNetworkRequest();
 
   CString cookie;
   EXPECT_HRESULT_FAILED(network_request->QueryHeadersString(
@@ -126,7 +126,7 @@ TEST_P(WebServicesClientTest, SendUsingCup) {
   xml::response::Response response(update_response_->response());
   EXPECT_STREQ(_T("3.0"), response.protocol);
 
-  NetworkRequest* network_request(network_request());
+  NetworkRequest* network_request = GetNetworkRequest();
 
   CString no_request_age_header;
   network_request->QueryHeadersString(
@@ -162,26 +162,6 @@ TEST_P(WebServicesClientTest, SendUsingCup) {
   SafeCStringAppendFormat(&expected_updater_header, _T("Omaha-%s"),
                                                     GetVersionString());
   EXPECT_STREQ(expected_updater_header, updater_header);
-
-  // A CUP transaction has either a request or a response CUP cookie and
-  // the ETag response header.
-  CString request_cookie;
-  network_request->QueryHeadersString(
-      WINHTTP_QUERY_COOKIE | WINHTTP_QUERY_FLAG_REQUEST_HEADERS,
-      WINHTTP_HEADER_NAME_BY_INDEX,
-      &request_cookie);
-  const bool has_cup_request_cookie = request_cookie.Find(_T("c=")) != -1;
-
-  CString response_cookie;
-  network_request->QueryHeadersString(WINHTTP_QUERY_SET_COOKIE,
-                                      WINHTTP_HEADER_NAME_BY_INDEX,
-                                      &response_cookie);
-  const bool has_cup_response_cookie = response_cookie.Find(_T("c=")) != -1;
-
-  CString etag;
-  EXPECT_HRESULT_SUCCEEDED(network_request->QueryHeadersString(
-      WINHTTP_QUERY_ETAG, WINHTTP_HEADER_NAME_BY_INDEX, &etag));
-  EXPECT_FALSE(etag.IsEmpty());
 
   // Check the custom headers after the response has been received.
   EXPECT_LT(0, web_service_client_->http_xdaystart_header_value());
@@ -223,7 +203,7 @@ TEST_F(WebServicesClientTest, SendForcingHttps) {
                                                      update_response_.get()));
   EXPECT_TRUE(web_service_client_->is_http_success());
 
-  NetworkRequest* network_request(network_request());
+  NetworkRequest* network_request = GetNetworkRequest();
 
   CString app_ids_header;
   network_request->QueryHeadersString(
@@ -235,7 +215,7 @@ TEST_F(WebServicesClientTest, SendForcingHttps) {
                _T("{E608D3AC-AA44-4754-A391-DA830AE78EA4}"),
                app_ids_header);
 
-  // Do a couple of sanity checks on the parsing of the response.
+  // Do a couple of checks on the parsing of the response.
   xml::response::Response response(update_response_->response());
   EXPECT_STREQ(_T("3.0"), response.protocol);
   ASSERT_EQ(2, response.apps.size());
@@ -259,7 +239,7 @@ TEST_F(WebServicesClientTest, SendWithCustomHeader) {
   xml::response::Response response(update_response_->response());
   EXPECT_STREQ(_T("3.0"), response.protocol);
 
-  NetworkRequest* network_request(network_request());
+  NetworkRequest* network_request = GetNetworkRequest();
 
   CString request_age_header;
   network_request->QueryHeadersString(
@@ -285,7 +265,7 @@ TEST_P(WebServicesClientTest, SendString) {
                                                            response.get()));
   EXPECT_TRUE(web_service_client_->is_http_success());
 
-  NetworkRequest* network_request(network_request());
+  NetworkRequest* network_request = GetNetworkRequest();
 
   CString interactive_header;
   network_request->QueryHeadersString(
@@ -324,7 +304,7 @@ TEST_F(WebServicesClientTest, SendStringWithCustomHeader) {
                                                            response.get()));
   EXPECT_TRUE(web_service_client_->is_http_success());
 
-  NetworkRequest* network_request(network_request());
+  NetworkRequest* network_request = GetNetworkRequest();
 
   CString foobar_header;
   network_request->QueryHeadersString(

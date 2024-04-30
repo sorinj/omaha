@@ -47,6 +47,7 @@ void VerifyCommandLineArgs(const CommandLineArgs& expected,
   EXPECT_EQ(expected.is_machine_set, actual.is_machine_set);
   EXPECT_EQ(expected.is_install_elevated, actual.is_install_elevated);
   EXPECT_EQ(expected.is_silent_set, actual.is_silent_set);
+  EXPECT_EQ(expected.is_always_launch_cmd_set, actual.is_always_launch_cmd_set);
   EXPECT_EQ(expected.is_eula_required_set, actual.is_eula_required_set);
   EXPECT_EQ(expected.is_enterprise_set, actual.is_enterprise_set);
   EXPECT_EQ(expected.is_offline_set, actual.is_offline_set);
@@ -58,8 +59,6 @@ void VerifyCommandLineArgs(const CommandLineArgs& expected,
   EXPECT_STREQ(expected.crash_filename, actual.crash_filename);
   EXPECT_STREQ(expected.custom_info_filename, actual.custom_info_filename);
   EXPECT_STREQ(expected.legacy_manifest_path, actual.legacy_manifest_path);
-  EXPECT_STREQ(expected.webplugin_urldomain, actual.webplugin_urldomain);
-  EXPECT_STREQ(expected.webplugin_args, actual.webplugin_args);
   EXPECT_STREQ(expected.code_red_metainstaller_path,
                actual.code_red_metainstaller_path);
   EXPECT_STREQ(expected.offline_dir_name, actual.offline_dir_name);
@@ -115,7 +114,7 @@ void VerifyCommandLineExtraArgs(const CommandLineExtraArgs& expected_val,
 #endif
   EXPECT_EQ(expected_val.browser_type, actual_val.browser_type);
   EXPECT_EQ(expected_val.usage_stats_enable, actual_val.usage_stats_enable);
-  EXPECT_EQ(expected_val.runtime_only, actual_val.runtime_only);
+  EXPECT_EQ(expected_val.runtime_mode, actual_val.runtime_mode);
 
   EXPECT_EQ(expected_val.apps.size(), actual_val.apps.size());
 
@@ -302,9 +301,9 @@ TEST_F(CommandLineTest, ParseCommandLine_Install) {
                              _T("{C7A9A2F5-C4F9-42d3-8A8B-55086A205468}&")
                              _T("appname=TestApp&needsadmin=true&lang=en")
 #if defined(HAS_DEVICE_MANAGEMENT)
-                            _T("&etoken=f6f767ba-8cfb-4d95-a26a-b3d714ddf1a2")
+                             _T("&etoken=f6f767ba-8cfb-4d95-a26a-b3d714ddf1a2")
 #endif
-                             ;
+                             _T("");
   CommandLineAppArgs app_args;
   const GUID expected_guid = {0xA4F7B07B, 0xB9BD, 0x4A33,
                               {0xB1, 0x36, 0x96, 0xD2, 0xAD, 0xFB, 0x60, 0xCB}};
@@ -430,6 +429,20 @@ TEST_F(CommandLineTest, ParseCommandLine_InstallWithAppArgsSilent) {
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, true, true);
 }
 
+// Parse <path> /install "extraargs" /appargs <appargs> /silent /alwayslaunchcmd
+TEST_F(CommandLineTest,
+       ParseCommandLine_InstallWithAppArgsSilentAlwaysLaunchCmd) {
+  const TCHAR* kCmdLine = _T("goopdate.exe /install ") YOUTUBEUPLOADEREN_TAG
+                          _T(" /appargs ") YOUTUBEUPLOADEREN_APP_ARGS
+                          _T(" /silent /alwayslaunchcmd");
+  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
+
+  expected_.mode = COMMANDLINE_MODE_INSTALL;
+  expected_.is_silent_set = true;
+  expected_.is_always_launch_cmd_set = true;
+  VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, true, true);
+}
+
 // Parse: <path> /install "extraargs" /oem /appargs <appargs> /silent
 TEST_F(CommandLineTest, ParseCommandLine_InstallWithOemAppArgsSilent) {
   const TCHAR* kCmdLine = _T("goopdate.exe /install ") YOUTUBEUPLOADEREN_TAG
@@ -475,27 +488,27 @@ TEST_F(CommandLineTest, ParseCommandLine_InstallEulaRequired) {
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
-// Parse: <path> /install "extraargs" /oem /installsource oneclick
+// Parse: <path> /install "extraargs" /oem /installsource taggedmi
 TEST_F(CommandLineTest, ParseCommandLine_InstallWithOemAndSource) {
   const TCHAR* kCmdLine = _T("goopdate.exe /install ") YOUTUBEUPLOADEREN_TAG
                           _T(" /oem")
-                          _T(" /installsource oneclick");
+                          _T(" /installsource taggedmi");
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_INSTALL;
   expected_.is_oem_set = true;
-  expected_.install_source = _T("oneclick");
+  expected_.install_source = _T("taggedmi");
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
-// Parse: <path> /install "extraargs" /installsource oneclick
+// Parse: <path> /install "extraargs" /installsource taggedmi
 TEST_F(CommandLineTest, ParseCommandLine_InstallWithSource) {
   const TCHAR* kCmdLine = _T("goopdate.exe /install ") YOUTUBEUPLOADEREN_TAG
-                          _T(" /installsource oneclick");
+                          _T(" /installsource taggedmi");
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_INSTALL;
-  expected_.install_source = _T("oneclick");
+  expected_.install_source = _T("taggedmi");
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
@@ -523,15 +536,15 @@ TEST_F(CommandLineTest, ParseCommandLine_InstallSilentWithOem) {
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
-// Parse: <path> /install "extraargs" /installsource oneclick /silent
+// Parse: <path> /install "extraargs" /installsource taggedmi /silent
 TEST_F(CommandLineTest, ParseCommandLine_InstallSilentWithSource) {
   const TCHAR* kCmdLine = _T("goopdate.exe /install ") YOUTUBEUPLOADEREN_TAG
-                          _T(" /installsource oneclick")
+                          _T(" /installsource taggedmi")
                           _T(" /silent");
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_INSTALL;
-  expected_.install_source = _T("oneclick");
+  expected_.install_source = _T("taggedmi");
   expected_.is_silent_set = true;
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
@@ -547,15 +560,15 @@ TEST_F(CommandLineTest, ParseCommandLine_InstallElevated) {
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
-// Parse: <path> /install "extraargs" /installelevated /installsource oneclick
+// Parse: <path> /install "extraargs" /installelevated /installsource taggedmi
 TEST_F(CommandLineTest, ParseCommandLine_InstallElevatedWithSource) {
   const TCHAR* kCmdLine = _T("goopdate.exe /install ") YOUTUBEUPLOADEREN_TAG
-                          _T(" /installelevated /installsource oneclick");
+                          _T(" /installelevated /installsource taggedmi");
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_INSTALL;
   expected_.is_install_elevated = true;
-  expected_.install_source = _T("oneclick");
+  expected_.install_source = _T("taggedmi");
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
@@ -589,11 +602,11 @@ TEST_F(CommandLineTest, ParseCommandLine_Handoff) {
 // Parse: <path> /handoff "extraargs" /installsource "asd"
 TEST_F(CommandLineTest, ParseCommandLine_HandoffWithSource) {
   const TCHAR* kCmdLine = _T("goopdate.exe /handoff ") YOUTUBEUPLOADEREN_TAG
-                          _T(" /installsource oneclick");
+                          _T(" /installsource taggedmi");
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_HANDOFF_INSTALL;
-  expected_.install_source = _T("oneclick");
+  expected_.install_source = _T("taggedmi");
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
@@ -672,6 +685,18 @@ TEST_F(CommandLineTest, ParseCommandLine_HandoffSilent) {
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
 
+// Parse: <path> /handoff "extraargs" /silent /alwayslaunchcmd
+TEST_F(CommandLineTest, ParseCommandLine_HandoffSilentAlwaysLaunchCmd) {
+  const TCHAR* kCmdLine = _T("goopdate.exe /handoff ") YOUTUBEUPLOADEREN_TAG
+                          _T(" /silent /alwayslaunchcmd");
+  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
+
+  expected_.mode = COMMANDLINE_MODE_HANDOFF_INSTALL;
+  expected_.is_silent_set = true;
+  expected_.is_always_launch_cmd_set = true;
+  VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
+}
+
 // Parse: <path> /handoff "extraargs" /enterprise
 TEST_F(CommandLineTest, ParseCommandLine_HandoffEnterprise) {
   const TCHAR* kCmdLine = _T("goopdate.exe /handoff ") YOUTUBEUPLOADEREN_TAG
@@ -700,12 +725,12 @@ TEST_F(CommandLineTest,
 // Parse: <path> /handoff "extraargs" /installsource "asd" /silent
 TEST_F(CommandLineTest, ParseCommandLine_HandoffSilentWithSource) {
   const TCHAR* kCmdLine = _T("goopdate.exe /handoff ") YOUTUBEUPLOADEREN_TAG
-                          _T(" /installsource oneclick")
+                          _T(" /installsource taggedmi")
                           _T(" /silent");
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_HANDOFF_INSTALL;
-  expected_.install_source = _T("oneclick");
+  expected_.install_source = _T("taggedmi");
   expected_.is_silent_set = true;
   VerifyArgsWithSingleYouTubeUploaderEnApp(expected_, args_, false, true);
 }
@@ -854,15 +879,6 @@ TEST_F(CommandLineTest, ParseCommandLine_UpdateSessionId) {
 
   expected_.mode = COMMANDLINE_MODE_UPDATE;
   expected_.session_id = _T("{756dfdc2-0ef0-44b7-bfb1-21a4be6a1213}");
-  VerifyCommandLineArgs(expected_, args_);
-}
-
-// Parse: <path> /netdiags
-TEST_F(CommandLineTest, ParseCommandLine_NetDiags) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /netdiags");
-  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
-
-  expected_.mode = COMMANDLINE_MODE_NETDIAGS;
   VerifyCommandLineArgs(expected_, args_);
 }
 
@@ -1025,43 +1041,6 @@ TEST_F(CommandLineTest, ParseCommandLine_CodeRedCheck) {
   VerifyCommandLineArgs(expected_, args_);
 }
 
-TEST_F(CommandLineTest, ParseCommandLine_WebPlugin) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /pi \"http://gears.google.com/\" ")
-                          _T("\"/install foo\" /installsource oneclick ");
-  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
-
-  expected_.mode = COMMANDLINE_MODE_WEBPLUGIN;
-  expected_.webplugin_urldomain = _T("http://gears.google.com/");
-  expected_.webplugin_args = _T("/install foo");
-  expected_.install_source = _T("oneclick");
-  VerifyCommandLineArgs(expected_, args_);
-}
-
-TEST_F(CommandLineTest, ParseCommandLine_WebPluginUrlEscaped) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /pi \"http://gears.google.com/\" ")
-                          _T("\"/install%20foo\" /installsource oneclick ");
-  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
-
-  expected_.mode = COMMANDLINE_MODE_WEBPLUGIN;
-  expected_.webplugin_urldomain = _T("http://gears.google.com/");
-  expected_.webplugin_args = _T("/install foo");
-  expected_.install_source = _T("oneclick");
-  VerifyCommandLineArgs(expected_, args_);
-}
-
-TEST_F(CommandLineTest, ParseCommandLine_WebPluginTestStringTrim) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /pi ")
-                          _T("\"  http://gears.google.com/   \"  ")
-                          _T("\"/install foo\" /installsource oneclick ");
-  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
-
-  expected_.mode = COMMANDLINE_MODE_WEBPLUGIN;
-  expected_.webplugin_urldomain = _T("http://gears.google.com/");
-  expected_.webplugin_args = _T("/install foo");
-  expected_.install_source = _T("oneclick");
-  VerifyCommandLineArgs(expected_, args_);
-}
-
 TEST_F(CommandLineTest, ParseCommandLine_LegacyOmaha1UiNoLanguage) {
   const TCHAR* kCmdLine = _T("goopdate.exe /ui \"manifestfilename.xml\"");
   EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
@@ -1174,18 +1153,6 @@ TEST_F(CommandLineTest, UiWithLangNoLanguage) {
   EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
 }
 
-TEST_F(CommandLineTest, WebPluginInstallSourceInvalid_IncorrectValue) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /installsource invalid /pi ")
-                          _T("\"  http://gears.google.com/   \"  ");
-  EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
-}
-
-TEST_F(CommandLineTest, WebPluginInstallSourceInvalid_Empty) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /installsource /pi ")
-                          _T("\"  http://gears.google.com/   \"  ");
-  EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
-}
-
 // Parse: <path> /handoff "extraargs" /lang "en"
 TEST_F(CommandLineTest, ParseCommandLine_HandoffLegacyOmaha1ToOmaha2) {
   const TCHAR* kCmdLine =
@@ -1203,18 +1170,18 @@ TEST_F(CommandLineTest,
       _T("goopdate.exe /handoff ")
       _T("\"appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
       _T("appname=YouTubeUploader&needsadmin=False\"")
-      _T(" /installsource oneclick /lang en");
+      _T(" /installsource taggedmi /lang en");
   EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
 }
 
-// Parse: <path> /handoff "extraargs" /installsource "oneclick" /lang "en"
+// Parse: <path> /handoff "extraargs" /installsource "taggedmi" /lang "en"
 TEST_F(CommandLineTest,
        ParseCommandLine_HandoffWithSourceLegacyOmaha1ToOmaha2Both) {
   const TCHAR* kCmdLine =
       _T("goopdate.exe /handoff ")
       _T("\"appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
       _T("appname=YouTubeUploader&needsadmin=False&lang=en\"")
-      _T(" /installsource oneclick /lang en");
+      _T(" /installsource taggedmi /lang en");
   EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
 }
 
@@ -1229,13 +1196,13 @@ TEST_F(CommandLineTest, ParseCommandLine_InstallLegacyOmaha1) {
   EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
 }
 
-// Parse: <path> /install "extraargs" /installsource oneclick /lang en
+// Parse: <path> /install "extraargs" /installsource taggedmi /lang en
 TEST_F(CommandLineTest, ParseCommandLine_InstallWithSourceLegacyOmaha1) {
   const TCHAR* kCmdLine =
       _T("goopdate.exe /install ")
       _T("\"appguid={A4F7B07B-B9BD-4a33-B136-96D2ADFB60CB}&")
       _T("appname=YouTubeUploader&needsadmin=False\"")
-      _T(" /installsource oneclick /lang en");
+      _T(" /installsource taggedmi /lang en");
   EXPECT_FAILED(ParseCommandLine(kCmdLine, &args_));
 }
 
@@ -1271,15 +1238,6 @@ TEST_F(CommandLineTest, ParseCommandLine_HealthCheck) {
   EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
 
   expected_.mode = COMMANDLINE_MODE_HEALTH_CHECK;
-  VerifyCommandLineArgs(expected_, args_);
-}
-
-// Parse: <path> /registermsihelper
-TEST_F(CommandLineTest, ParseCommandLine_RegisterMsiHelper) {
-  const TCHAR* kCmdLine = _T("goopdate.exe /registermsihelper");
-  EXPECT_SUCCEEDED(ParseCommandLine(kCmdLine, &args_));
-
-  expected_.mode = COMMANDLINE_MODE_REGISTER_MSI_HELPER;
   VerifyCommandLineArgs(expected_, args_);
 }
 

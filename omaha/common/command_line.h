@@ -60,7 +60,7 @@ enum CommandLineMode {
   COMMANDLINE_MODE_SERVICE = 3,
   COMMANDLINE_MODE_REGSERVER = 4,
   COMMANDLINE_MODE_UNREGSERVER = 5,
-  COMMANDLINE_MODE_NETDIAGS = 6,
+  // Obsolete: COMMANDLINE_MODE_NETDIAGS = 6,
   COMMANDLINE_MODE_CRASH = 7,
   COMMANDLINE_MODE_REPORTCRASH = 8,
   COMMANDLINE_MODE_INSTALL = 9,
@@ -70,7 +70,7 @@ enum CommandLineMode {
   // Obsolete: COMMANDLINE_MODE_UG = 13,
   COMMANDLINE_MODE_UA = 14,
   COMMANDLINE_MODE_RECOVER = 15,
-  COMMANDLINE_MODE_WEBPLUGIN = 16,
+  // Obsolete: COMMANDLINE_MODE_WEBPLUGIN = 16,
   COMMANDLINE_MODE_CODE_RED_CHECK = 17,
   COMMANDLINE_MODE_COMSERVER = 18,
   // Obsolete: COMMANDLINE_MODE_LEGACYUI = 19,
@@ -86,7 +86,7 @@ enum CommandLineMode {
   COMMANDLINE_MODE_UNINSTALL = 29,
   COMMANDLINE_MODE_PING = 30,
   COMMANDLINE_MODE_HEALTH_CHECK = 31,
-  COMMANDLINE_MODE_REGISTER_MSI_HELPER = 32,
+  // Obsolete: COMMANDLINE_MODE_REGISTER_MSI_HELPER = 32,
 };
 
 struct CommandLineExtraArgs {
@@ -94,7 +94,7 @@ struct CommandLineExtraArgs {
       : installation_id(GUID_NULL),
         browser_type(BROWSER_UNKNOWN),
         usage_stats_enable(TRISTATE_NONE),
-        runtime_only(false) {}
+        runtime_mode(RUNTIME_MODE_NOT_SET) {}
 
   CString bundle_name;
   GUID installation_id;
@@ -108,7 +108,7 @@ struct CommandLineExtraArgs {
 #endif
   BrowserType browser_type;
   Tristate usage_stats_enable;
-  bool runtime_only;
+  RuntimeMode runtime_mode;
 
   std::vector<CommandLineAppArgs> apps;
 };
@@ -121,6 +121,7 @@ struct CommandLineArgs {
         is_crash_handler_disabled(false),
         is_install_elevated(false),
         is_silent_set(false),
+        is_always_launch_cmd_set(false),
         is_eula_required_set(false),
         is_offline_set(false),
         is_enterprise_set(false),
@@ -132,6 +133,7 @@ struct CommandLineArgs {
   bool is_crash_handler_disabled;
   bool is_install_elevated;
   bool is_silent_set;
+  bool is_always_launch_cmd_set;
   bool is_eula_required_set;
   bool is_offline_set;
   bool is_enterprise_set;
@@ -142,8 +144,6 @@ struct CommandLineArgs {
   CString crash_filename;
   CString custom_info_filename;
   CString legacy_manifest_path;
-  CString webplugin_urldomain;
-  CString webplugin_args;
   CString code_red_metainstaller_path;
   CString ping_string;
   CString offline_dir_name;

@@ -29,7 +29,6 @@
 #include "omaha/base/signaturevalidator.h"
 #include "omaha/base/utils.h"
 #include "omaha/common/config_manager.h"
-#include "omaha/goopdate/file_hash.h"
 #include "omaha/goopdate/package_cache_internal.h"
 #include "omaha/goopdate/worker_metrics.h"
 
@@ -142,18 +141,54 @@ void SortPackageInfoByTime(std::vector<PackageInfo>* packages_info) {
             PackageSortByTimePredicate);
 }
 
-CString GetHashString(const FileHash& hash) {
-  return hash.sha256.IsEmpty() ? hash.sha1 : hash.sha256;
+HRESULT FileCopy(File* source_file, const CString& destination) {
+  ASSERT1(source_file);
+
+  File destination_file;
+  HRESULT hr = destination_file.Open(destination, true, false);
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  hr = source_file->SeekToBegin();
+  if (FAILED(hr)) {
+    return hr;
+  }
+
+  byte buffer[4096] = {};
+  uint32 bytes_read = 0;
+  do {
+    hr = source_file->Read(arraysize(buffer), buffer, &bytes_read);
+    if (FAILED(hr)) {
+      return hr;
+    }
+
+    if (!bytes_read) {
+      return S_OK;
+    }
+
+    uint32 bytes_written(0);
+    hr = destination_file.Write(buffer, bytes_read, &bytes_written);
+    if (FAILED(hr)) {
+      return hr;
+    }
+
+    if (bytes_written != bytes_read) {
+      return E_UNEXPECTED;
+    }
+  } while (bytes_read > 0);
+
+  return S_OK;
 }
 
 }  // namespace internal
 
 PackageCache::PackageCache() {
   cache_time_limit_days_ =
-    ConfigManager::Instance()->GetPackageCacheExpirationTimeDays();
+    ConfigManager::Instance()->GetPackageCacheExpirationTimeDays(NULL);
 
   cache_size_limit_bytes_ = 1024 * 1024 * static_cast<uint64>(
-    ConfigManager::Instance()->GetPackageCacheSizeLimitMBytes());
+    ConfigManager::Instance()->GetPackageCacheSizeLimitMBytes(NULL));
 }
 
 PackageCache::~PackageCache() {
@@ -179,9 +214,9 @@ HRESULT PackageCache::Initialize(const CString& cache_root) {
   return S_OK;
 }
 
-bool PackageCache::IsCached(const Key& key, const FileHash& hash) const {
+bool PackageCache::IsCached(const Key& key, const CString& hash) const {
   CORE_LOG(L3, (_T("[PackageCache::IsCached][key '%s'][hash %s]"),
-                key.ToString(), internal::GetHashString(hash)));
+                key.ToString(), hash));
 
   __mutexScope(cache_lock_);
 
@@ -195,11 +230,13 @@ bool PackageCache::IsCached(const Key& key, const FileHash& hash) const {
 }
 
 HRESULT PackageCache::Put(const Key& key,
-                          const CString& source_file,
-                          const FileHash& hash) {
+                          File* source_file,
+                          const CString& hash) {
+  ASSERT1(source_file);
+
   ++metric_worker_package_cache_put_total;
-  CORE_LOG(L3, (_T("[PackageCache::Put][key '%s'][source_file '%s'][hash %s]"),
-                key.ToString(), source_file, internal::GetHashString(hash)));
+  CORE_LOG(L3, (_T("[PackageCache::Put][key '%s'][hash %s]"),
+                key.ToString(), hash));
 
   __mutexScope(cache_lock_);
 
@@ -225,9 +262,7 @@ HRESULT PackageCache::Put(const Key& key,
   // TODO(omaha): consider not overwriting the file if the file is
   // in the cache and it is valid.
 
-  // When not impersonated, File::Copy resets the ownership of the destination
-  // file and it inherits ACEs from the new parent directory.
-  hr = File::Copy(source_file, destination_file, true);
+  hr = internal::FileCopy(source_file, destination_file);
   if (FAILED(hr)) {
     CORE_LOG(LE, (_T("[failed to copy file to cache][0x%08x][%s]"),
                   hr, destination_file));
@@ -238,7 +273,7 @@ HRESULT PackageCache::Put(const Key& key,
   if (FAILED(hr)) {
     CORE_LOG(LE,
         (_T("[failed to verify hash for file '%s'][expected hash %s]"),
-        destination_file, internal::GetHashString(hash)));
+        destination_file, hash));
     VERIFY1(::DeleteFile(destination_file));
     return hr;
   }
@@ -249,9 +284,9 @@ HRESULT PackageCache::Put(const Key& key,
 
 HRESULT PackageCache::Get(const Key& key,
                           const CString& destination_file,
-                          const FileHash& hash) const {
+                          const CString& hash) const {
   CORE_LOG(L3, (_T("[PackageCache::Get][key '%s'][dest file '%s'][hash '%s']"),
-      key.ToString(), destination_file, internal::GetHashString(hash)));
+      key.ToString(), destination_file, hash));
 
   __mutexScope(cache_lock_);
 
@@ -274,7 +309,7 @@ HRESULT PackageCache::Get(const Key& key,
   hr = VerifyHash(source_file, hash);
   if (FAILED(hr)) {
     CORE_LOG(LE, (_T("[failed to verify hash for file '%s'][expected hash %s]"),
-        source_file, internal::GetHashString(hash)));
+        source_file, hash));
     return hr;
   }
 
@@ -485,19 +520,17 @@ HRESULT PackageCache::BuildCacheFileName(const CString& app_id,
 }
 
 HRESULT PackageCache::VerifyHash(const CString& filename,
-                                 const FileHash& expected_hash) {
+                                 const CString& expected_hash) {
   CORE_LOG(L3, (_T("[PackageCache::VerifyHash][%s][%s]"),
-           filename, internal::GetHashString(expected_hash)));
+           filename, expected_hash));
   HighresTimer verification_timer;
 
   std::vector<CString> files;
   files.push_back(filename);
-  HRESULT hr = expected_hash.sha256.IsEmpty() ?
-      VerifyFileHash(files, expected_hash.sha1) :
-      VerifyFileHashSha256(files, expected_hash.sha256);
+
+  HRESULT hr = VerifyFileHashSha256(files, expected_hash);
   CORE_LOG(L3, (_T("[PackageCache::VerifyHash completed][0x%08x][%d ms]"),
                 hr, verification_timer.GetElapsedMs()));
-
   return hr;
 }
 

@@ -98,6 +98,12 @@ class AppManager {
   // Populates the app object with the persisted state stored in the registry.
   HRESULT ReadAppPersistentData(App* app);
 
+  // Populates the app object with the pv value stored in the registry if it
+  // exists for the app. The pv is set in the `current_version` of the app
+  // object, with a '-' (negative) prefix. This is to allow for the server to
+  // always return the latest version for the app in the update response.
+  void ReadFirstInstallAppVersion(App* app);
+
   // Populates the app object with the install time diff based on the install
   // time stored in the registry.
   // If the app is registered or has pv value, app's install time diff will be
@@ -207,6 +213,12 @@ class AppManager {
   //       was implemented.
   // Omaha will not send day_of_install if it is 0.
   uint32 GetDayOfInstall(const GUID& app_guid) const;
+
+  // Returns a Tristate of whether usage stats are enabled.
+  //   Returns TRISTATE_NONE for unregistered apps.
+  //   Returns TRISTATE_TRUE if usage stats consent is true.
+  //   Returns TRISTATE_FALSE if usage stats consent is false or is unset.
+  Tristate GetAppUsageStatsEnabled(const GUID& app_guid) const;
 
   bool IsAppRegistered(const CString& app_id) const;
   bool IsAppUninstalled(const CString& app_id) const;

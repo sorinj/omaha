@@ -313,14 +313,14 @@ bool CopyOfflineFiles(bool is_machine,
   }
 
   GUID guid(GUID_NULL);
-  VERIFY1(SUCCEEDED(::CoCreateGuid(&guid)));
+  VERIFY_SUCCEEDED(::CoCreateGuid(&guid));
   CString parent_offline_dir(
       is_machine ?
       ConfigManager::Instance()->GetMachineSecureOfflineStorageDir() :
       ConfigManager::Instance()->GetUserOfflineStorageDir());
   CString offline_dir_guid(GuidToString(guid));
   CString offline_path(ConcatenatePath(parent_offline_dir, offline_dir_guid));
-  VERIFY1(SUCCEEDED(CreateDir(offline_path, NULL)));
+  VERIFY_SUCCEEDED(CreateDir(offline_path, NULL));
 
   HRESULT hr = CopyOfflineManifest(offline_path);
   if (FAILED(hr)) {
@@ -387,7 +387,7 @@ HRESULT CopyOfflineFilesForApp(const CString& app_id,
 
   CString offline_app_dir = ConcatenatePath(offline_dir, app_id);
   if (File::IsDirectory(offline_app_dir)) {
-    VERIFY1(SUCCEEDED(DeleteDirectoryFiles(offline_app_dir)));
+    VERIFY_SUCCEEDED(DeleteDirectoryFiles(offline_app_dir));
   } else {
     hr = CreateDir(offline_app_dir, NULL);
     if (FAILED(hr)) {
@@ -449,6 +449,7 @@ HRESULT LaunchHandoffProcess(bool is_machine,
   CommandLineBuilder builder(COMMANDLINE_MODE_HANDOFF_INSTALL);
 
   builder.set_is_silent_set(install_args.is_silent_set);
+  builder.set_is_always_launch_cmd_set(install_args.is_always_launch_cmd_set);
   builder.set_is_eula_required_set(install_args.is_eula_required_set);
   builder.set_is_enterprise_set(install_args.is_enterprise_set);
   builder.set_extra_args(install_args.extra_args_str);
@@ -472,6 +473,7 @@ HRESULT LaunchHandoffProcess(bool is_machine,
   CString cmd_line = builder.GetCommandLineArgs();
 
   HRESULT hr = goopdate_utils::StartGoogleUpdateWithArgs(is_machine,
+                                                         StartMode::kForeground,
                                                          cmd_line,
                                                          process);
   if (FAILED(hr)) {
@@ -699,7 +701,7 @@ HRESULT Install(bool is_interactive,
   // with this run of Omaha.  This will need to be passed along to any child
   // processes we create.
   CString session_id;
-  VERIFY1(SUCCEEDED(GetGuid(&session_id)));
+  VERIFY_SUCCEEDED(GetGuid(&session_id));
 
   // 'current_version' corresponds to the value of 'pv' read from
   // registry. This value is either empty, in the case of a new install or
@@ -871,7 +873,7 @@ HRESULT OemInstall(bool is_interactive,
                has_ui_been_displayed);
 
   if (FAILED(hr)) {
-    VERIFY1(SUCCEEDED(oem_install_utils::ResetOemInstallState(*is_machine)));
+    VERIFY_SUCCEEDED(oem_install_utils::ResetOemInstallState(*is_machine));
     return hr;
   }
 

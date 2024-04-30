@@ -33,12 +33,10 @@
 //      /ua
 //  * Core:
 //      /c
-//  * Cod Red check:
+//  * Code Red check:
 //      /cr
-//  * Cod Red repair:
+//  * Code Red repair:
 //      /recover [/machine]
-//  * OneClick:
-//      /pi "http://www.google.com/" "/install%20%22appguid=%7B8A69D345-D564-463C-AFF1-A69D9E530F96%7D%26lang=en%26appname=Google%2520Chrome%26needsadmin=false" /installsource oneclick  // NOLINT
 //  * COM server:
 //      -Embedding
 
@@ -46,6 +44,7 @@
 
 #include <atlstr.h>
 #include <new>
+#include <utility>
 
 #include "omaha/base/app_util.h"
 #include "omaha/base/const_object_names.h"
@@ -80,7 +79,6 @@
 #include "omaha/common/oem_install_utils.h"
 #include "omaha/common/scheduled_task_utils.h"
 #include "omaha/common/stats_uploader.h"
-#include "omaha/common/webplugin_utils.h"
 #include "omaha/core/core.h"
 #include "omaha/goopdate/code_red_check.h"
 #include "omaha/goopdate/crash.h"
@@ -88,7 +86,6 @@
 #include "omaha/goopdate/goopdate_internal.h"
 #include "omaha/goopdate/goopdate_metrics.h"
 #include "omaha/goopdate/resource_manager.h"
-#include "omaha/net/net_diags.h"
 #include "omaha/service/service_main.h"
 #include "omaha/setup/setup_google_update.h"
 #include "omaha/setup/setup_service.h"
@@ -135,20 +132,17 @@ bool CheckRegisteredVersion(const CString& version,
     case COMMANDLINE_MODE_NOARGS:
     case COMMANDLINE_MODE_REGSERVER:
     case COMMANDLINE_MODE_UNREGSERVER:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     case COMMANDLINE_MODE_REPORTCRASH:
     case COMMANDLINE_MODE_INSTALL:
     case COMMANDLINE_MODE_UPDATE:
     case COMMANDLINE_MODE_RECOVER:
-    case COMMANDLINE_MODE_WEBPLUGIN:
     case COMMANDLINE_MODE_REGISTER_PRODUCT:
     case COMMANDLINE_MODE_UNREGISTER_PRODUCT:
     case COMMANDLINE_MODE_SERVICE_REGISTER:
     case COMMANDLINE_MODE_SERVICE_UNREGISTER:
     case COMMANDLINE_MODE_PING:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
       return true;
 
     // COM servers and services that should only run after installation.
@@ -170,10 +164,10 @@ bool CheckRegisteredVersion(const CString& version,
     default:
       // This binary's version should be the installed version.
       CString installed_version;
-      VERIFY1(SUCCEEDED(RegKey::GetValue(
+      VERIFY_SUCCEEDED(RegKey::GetValue(
           ConfigManager::Instance()->registry_update(is_machine),
           kRegValueInstalledVersion,
-          &installed_version)));
+          &installed_version));
       return version == installed_version;
   }
 }
@@ -212,7 +206,7 @@ class GoopdateImpl {
 
   HRESULT Main(HINSTANCE instance, const TCHAR* cmd_line, int cmd_show);
 
-  HRESULT QueueUserWorkItem(UserWorkItem* work_item,
+  HRESULT QueueUserWorkItem(std::unique_ptr<UserWorkItem> work_item,
                             DWORD coinit_flags,
                             uint32 flags);
 
@@ -249,9 +243,6 @@ class GoopdateImpl {
   // Handles error conditions by showing UI if appropriate.
   void HandleError(HRESULT hr, bool has_ui_been_displayed);
 
-  // Handles response to /pi command.
-  HRESULT HandleWebPlugin();
-
   // Handles responses to /cr command.
   HRESULT HandleCodeRedCheck();
 
@@ -287,11 +278,6 @@ class GoopdateImpl {
   // whether it is installed and functioning correctly by returning S_OK.
   HRESULT HandleHealthCheck();
 
-  // The "registermsihelper" switch allows installing the MSI Helper in a
-  // separate process, isolating any crashes in MSI registration from affecting
-  // the rest of the codebase.
-  HRESULT HandleRegisterMsiHelper();
-
   // TODO(omaha): Reconcile the two uninstall functions and paths.
   void MaybeUninstallGoogleUpdate();
 
@@ -299,9 +285,9 @@ class GoopdateImpl {
   // or the app and there are no other apps registered.
   HRESULT UninstallIfNecessary();
 
-  // Use PROCESS_MODE_BACKGROUND_BEGIN for processes that do background work.
-  bool ShouldSetBackgroundPriority(CommandLineMode mode);
-  HRESULT SetBackgroundPriorityIfNeeded(CommandLineMode mode);
+  // Use BELOW_NORMAL_PRIORITY_CLASS for processes that do background work.
+  bool ShouldSetBelowNormalPriority(CommandLineMode mode);
+  HRESULT SetBelowNormalPriorityIfNeeded(CommandLineMode mode);
 
   HRESULT CaptureUserMetrics();
 
@@ -367,7 +353,7 @@ GoopdateImpl::GoopdateImpl(Goopdate* goopdate, bool is_local_system)
   // Install the exception handler.  If GoogleCrashHandler is running, this will
   // connect to it for out-of-process handling; if not, it will install an
   // in-process breakpad crash handler with a callback to upload it.
-  VERIFY1(SUCCEEDED(InstallExceptionHandler()));
+  VERIFY_SUCCEEDED(InstallExceptionHandler());
 
   // Hints network configure manager how to create its singleton.
   NetworkConfigManager::set_is_machine(is_machine_);
@@ -400,6 +386,8 @@ GoopdateImpl::~GoopdateImpl() {
 
   Stop();
 
+  thread_pool_.reset();
+
 #if defined(HAS_DEVICE_MANAGEMENT)
   DmStorage::DeleteInstance();
 #endif
@@ -407,9 +395,9 @@ GoopdateImpl::~GoopdateImpl() {
   // Bug 994348 does not repro anymore.
   // If the assert fires, clean up the key, and fix the code if we have unit
   // tests or application code that create the key.
-  ASSERT(!RegKey::HasKey(_T("HKEY_USERS\\.DEFAULT\\Software\\Google\\Update")),
+  ASSERT(!RegKey::HasKey(_T("HKEY_USERS\\.DEFAULT\\Software\\") PATH_COMPANY_NAME _T("\\Update")),
          (_T("This assert has fired because it has found the registry key at ")
-          _T("'HKEY_USERS\\.DEFAULT\\Software\\Google\\Update'. ")
+          _T("'HKEY_USERS\\.DEFAULT\\Software\\") PATH_COMPANY_NAME _T("\\Update'. ")
           _T("Please delete the key and report to omaha-core team if ")
           _T("the assert fires again.")));
 
@@ -425,20 +413,19 @@ GoopdateImpl::~GoopdateImpl() {
   set_new_handler(NULL);
 }
 
-HRESULT GoopdateImpl::QueueUserWorkItem(UserWorkItem* work_item,
+HRESULT GoopdateImpl::QueueUserWorkItem(std::unique_ptr<UserWorkItem> work_item,
                                         DWORD coinit_flags,
                                         uint32 flags) {
   CORE_LOG(L3, (_T("[GoopdateImpl::QueueUserWorkItem]")));
   ASSERT1(work_item);
-
   ASSERT1(thread_pool_.get());
-
-  return thread_pool_->QueueUserWorkItem(work_item, coinit_flags, flags);
+  return thread_pool_->QueueUserWorkItem(std::move(work_item),
+                                         coinit_flags,
+                                         flags);
 }
 
 void GoopdateImpl::Stop() {
-  // The thread pool destructor waits for any remaining jobs to complete.
-  thread_pool_.reset();
+  thread_pool_->Stop();    // Waits a little for any remaining jobs to complete.
 }
 
 // Assumes the resources are loaded and members are initialized.
@@ -517,9 +504,9 @@ HRESULT GoopdateImpl::Main(HINSTANCE instance,
     did_install_uninstall_fail = FAILED(UninstallIfNecessary());
   } else if (!has_uninstalled_) {
     if (args_.mode == COMMANDLINE_MODE_UA) {
-      VERIFY1(SUCCEEDED(AggregateAndReportMetrics(is_machine_, false)));
+      VERIFY_SUCCEEDED(AggregateAndReportMetrics(is_machine_, false));
     } else if (!is_machine_ || vista_util::IsUserAdmin()) {
-      VERIFY1(SUCCEEDED(AggregateMetrics(is_machine_)));
+      VERIFY_SUCCEEDED(AggregateMetrics(is_machine_));
     }
   }
 
@@ -553,7 +540,6 @@ HRESULT GoopdateImpl::Main(HINSTANCE instance,
       COMMANDLINE_MODE_SERVICE_REGISTER != args_.mode &&
       COMMANDLINE_MODE_SERVICE_UNREGISTER != args_.mode &&
       COMMANDLINE_MODE_HEALTH_CHECK != args_.mode &&
-      COMMANDLINE_MODE_REGISTER_MSI_HELPER != args_.mode &&
       COMMANDLINE_MODE_UNKNOWN != args_.mode &&
       !(COMMANDLINE_MODE_INSTALL == args_.mode &&
         is_machine_ &&
@@ -580,11 +566,11 @@ HRESULT GoopdateImpl::DoMain(HINSTANCE instance,
   // The system terminates the process without displaying a retry dialog box
   // for the user. GoogleUpdate has no user state to be saved, therefore
   // prompting the user for input is meaningless.
-  VERIFY1(SUCCEEDED(SetProcessSilentShutdown()));
+  VERIFY_SUCCEEDED(SetProcessSilentShutdown());
 
-  VERIFY1(SUCCEEDED(CaptureOSMetrics()));
+  VERIFY_SUCCEEDED(CaptureOSMetrics());
 
-  VERIFY1(SUCCEEDED(vista_util::EnableProcessHeapMetadataProtection()));
+  VERIFY_SUCCEEDED(vista_util::EnableProcessHeapMetadataProtection());
 
   CString module_path = app_util::GetModulePath(module_instance_);
   ASSERT1(!module_path.IsEmpty());
@@ -609,6 +595,12 @@ HRESULT GoopdateImpl::DoMain(HINSTANCE instance,
     args_.mode = COMMANDLINE_MODE_UNKNOWN;
     // Continue because we want to load the resources and display an error.
   }
+
+#if defined(HAS_DEVICE_MANAGEMENT)
+  // Reference the DmStorage instance here so the singleton can be created
+  // before use.
+  VERIFY_SUCCEEDED(DmStorage::CreateInstance(args_.extra.enrollment_token));
+#endif
 
   // TODO(omaha3): Interactive updates might be useful for debugging or even
   // on-demand updates of all apps. Figure out how to expose this. For now, no
@@ -636,7 +628,7 @@ HRESULT GoopdateImpl::DoMain(HINSTANCE instance,
     return hr;
   }
 
-  VERIFY1(SUCCEEDED(CaptureUserMetrics()));
+  VERIFY_SUCCEEDED(CaptureUserMetrics());
 
   // The resources are now loaded and available if applicable for this instance.
   // If there was no bundle name specified on the command line, we take the
@@ -655,7 +647,7 @@ HRESULT GoopdateImpl::DoMain(HINSTANCE instance,
   bool has_ui_been_displayed = false;
 
   if (!is_machine_ && vista_util::IsElevatedWithEnableLUAOn()) {
-    CORE_LOG(LW, (_T("User GoogleUpdate is possibly running in an unsupported ")
+    CORE_LOG(LW, (_T("User ") MAIN_EXE_BASE_NAME _T(" is possibly running in an unsupported ")
                   _T("way, at High integrity with UAC possibly enabled.")));
   }
 
@@ -692,7 +684,7 @@ HRESULT GoopdateImpl::InitializeGoopdateAndLoadResources() {
 
   // After parsing the command line, reinstall the crash handler to match the
   // state of the process.
-  VERIFY1(SUCCEEDED(InstallExceptionHandler()));
+  VERIFY_SUCCEEDED(InstallExceptionHandler());
 
   // We have parsed the command line, and we are now resetting is_machine.
   NetworkConfigManager::set_is_machine(
@@ -711,9 +703,9 @@ HRESULT GoopdateImpl::InitializeGoopdateAndLoadResources() {
 
   // Set the usage stats as soon as possible, which is after the command line
   // has been parsed, so that we can report crashes and other stats.
-  VERIFY1(SUCCEEDED(SetUsageStatsEnable()));
+  VERIFY_SUCCEEDED(SetUsageStatsEnable());
 
-  VERIFY1(SUCCEEDED(internal::PromoteAppEulaAccepted(is_machine_)));
+  VERIFY_SUCCEEDED(internal::PromoteAppEulaAccepted(is_machine_));
 
   if (ShouldCheckShutdownEvent(args_.mode) && IsShutdownEventSet()) {
     return GOOPDATE_E_SHUTDOWN_SIGNALED;
@@ -724,6 +716,18 @@ HRESULT GoopdateImpl::InitializeGoopdateAndLoadResources() {
     CORE_LOG(LE, (_T("[LoadResourceDllIfNecessary failed][0x%08x]"), hr));
     return hr;
   }
+
+#if defined(HAS_DEVICE_MANAGEMENT)
+
+  CachedOmahaPolicy dm_policy;
+  hr = DmStorage::Instance()->ReadCachedOmahaPolicy(&dm_policy);
+  if (FAILED(hr)) {
+    OPT_LOG(LE, (_T("[ReadCachedOmahaPolicy failed][%#x]"), hr));
+  } else {
+    ConfigManager::Instance()->SetOmahaDMPolicies(dm_policy);
+  }
+
+#endif  // defined(HAS_DEVICE_MANAGEMENT)
 
   return S_OK;
 }
@@ -757,13 +761,7 @@ HRESULT GoopdateImpl::ExecuteMode(bool* has_ui_been_displayed) {
 
   ASSERT1(CheckRegisteredVersion(GetVersionString(), is_machine_, mode));
 
-  VERIFY1(SUCCEEDED(SetBackgroundPriorityIfNeeded(mode)));
-
-#if defined(HAS_DEVICE_MANAGEMENT)
-  // Reference the DmStorage instance here so the singleton can be created
-  // before use.
-  VERIFY1(SUCCEEDED(DmStorage::CreateInstance(args_.extra.enrollment_token)));
-#endif
+  VERIFY_SUCCEEDED(SetBelowNormalPriorityIfNeeded(mode));
 
 #pragma warning(push)
 // C4061: enumerator 'xxx' in switch of enum 'yyy' is not explicitly handled by
@@ -848,14 +846,8 @@ HRESULT GoopdateImpl::ExecuteMode(bool* has_ui_been_displayed) {
           NetworkConfigManager::Instance();
 
           switch (mode) {
-            case COMMANDLINE_MODE_WEBPLUGIN:
-              return HandleWebPlugin();
-
             case COMMANDLINE_MODE_CODE_RED_CHECK:
               return HandleCodeRedCheck();
-
-            case COMMANDLINE_MODE_NETDIAGS:
-              return NetDiags().Main();
 
             case COMMANDLINE_MODE_REGISTER_PRODUCT:
               // TODO(omaha3): Eliminate the need for this mode.
@@ -920,9 +912,6 @@ HRESULT GoopdateImpl::ExecuteMode(bool* has_ui_been_displayed) {
             case COMMANDLINE_MODE_HEALTH_CHECK:
               return HandleHealthCheck();
 
-            case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
-              return HandleRegisterMsiHelper();
-
             default:
               // We have a COMMANDLINE_MODE_ that isn't being handled.
               ASSERT1(false);
@@ -954,12 +943,12 @@ bool GoopdateImpl::IsMachineProcess() {
 
 HRESULT GoopdateImpl::HandleReportCrash() {
   ++metric_goopdate_handle_report_crash;
-  VERIFY1(SUCCEEDED(AggregateMetrics(is_machine_)));
+  VERIFY_SUCCEEDED(AggregateMetrics(is_machine_));
 
   ConfigManager* cm = ConfigManager::Instance();
 
   CString upload_url;
-  VERIFY1(SUCCEEDED(cm->GetCrashReportUrl(&upload_url)));
+  VERIFY_SUCCEEDED(cm->GetCrashReportUrl(&upload_url));
   ASSERT1(!upload_url.IsEmpty());
 
   CrashReporter reporter;
@@ -982,7 +971,6 @@ bool GoopdateImpl::ShouldCheckShutdownEvent(CommandLineMode mode) {
     case COMMANDLINE_MODE_NOARGS:
     case COMMANDLINE_MODE_REGSERVER:
     case COMMANDLINE_MODE_UNREGSERVER:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     case COMMANDLINE_MODE_REPORTCRASH:
     case COMMANDLINE_MODE_RECOVER:
@@ -991,13 +979,11 @@ bool GoopdateImpl::ShouldCheckShutdownEvent(CommandLineMode mode) {
 
     case COMMANDLINE_MODE_INSTALL:
     case COMMANDLINE_MODE_UPDATE:
-    case COMMANDLINE_MODE_WEBPLUGIN:
     case COMMANDLINE_MODE_CODE_RED_CHECK:
     case COMMANDLINE_MODE_REGISTER_PRODUCT:
     case COMMANDLINE_MODE_UNREGISTER_PRODUCT:
     case COMMANDLINE_MODE_PING:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
     case COMMANDLINE_MODE_UA:
       return false;
 
@@ -1062,10 +1048,8 @@ HRESULT GoopdateImpl::LoadResourceDllIfNecessary(CommandLineMode mode,
     case COMMANDLINE_MODE_CORE:
     case COMMANDLINE_MODE_REGSERVER:
     case COMMANDLINE_MODE_UNREGSERVER:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     case COMMANDLINE_MODE_REPORTCRASH:
-    case COMMANDLINE_MODE_WEBPLUGIN:
     case COMMANDLINE_MODE_CODE_RED_CHECK:
     case COMMANDLINE_MODE_REGISTER_PRODUCT:
     case COMMANDLINE_MODE_UNREGISTER_PRODUCT:
@@ -1074,7 +1058,6 @@ HRESULT GoopdateImpl::LoadResourceDllIfNecessary(CommandLineMode mode,
     case COMMANDLINE_MODE_UNINSTALL:
     case COMMANDLINE_MODE_PING:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
     default:
       // These modes do not need the resource DLL.
       ASSERT1(!internal::CanDisplayUi(mode, false));
@@ -1143,19 +1126,6 @@ HRESULT GoopdateImpl::HandleCodeRedCheck() {
   return S_OK;
 }
 
-// Even though http://b/1135173 is fixed, there is still a possibility that only
-// some of the files will be copied if Setup is currently running.
-// TODO(omaha3): If we save and use the metainstaller for OneClick, that may
-// address this.
-
-// If we're called with the /webplugin command, we need to handle it and exit.
-// This is called from the browser and the command line arguments come from the
-// website so we need to be restrictive of what we let past. If everything from
-// the plugin is valid, we'll relaunch goopdate with the proper commands.
-HRESULT GoopdateImpl::HandleWebPlugin() {
-  return webplugin_utils::DoOneClickInstall(args_);
-}
-
 HRESULT GoopdateImpl::DoInstall(bool* has_ui_been_displayed) {
   OPT_LOG(L1, (_T("[GoopdateImpl::DoInstall]")));
   ASSERT1(has_ui_been_displayed);
@@ -1200,7 +1170,7 @@ HRESULT GoopdateImpl::DoInstall(bool* has_ui_been_displayed) {
 
   if (args_.is_oem_set) {
     hr = OemInstall(!args_.is_silent_set,       // is_interactive
-                    !args_.extra.runtime_only,  // is_app_install
+                    args_.extra.runtime_mode == RUNTIME_MODE_NOT_SET,
                     args_.is_eula_required_set,
                     args_.is_install_elevated,
                     install_command_line,
@@ -1209,7 +1179,7 @@ HRESULT GoopdateImpl::DoInstall(bool* has_ui_been_displayed) {
                     has_ui_been_displayed);
   } else {
     hr = Install(!args_.is_silent_set,          // is_interactive
-                 !args_.extra.runtime_only,     // is_app_install
+                 args_.extra.runtime_mode == RUNTIME_MODE_NOT_SET,
                  args_.is_eula_required_set,
                  false,
                  args_.is_enterprise_set,
@@ -1300,11 +1270,12 @@ HRESULT GoopdateImpl::DoHandoff(bool* has_ui_been_displayed) {
   // prior version does a handoff to a newer version.)
   CString session_id = args_.session_id;
   if (session_id.IsEmpty()) {
-    VERIFY1(SUCCEEDED(GetGuid(&session_id)));
+    VERIFY_SUCCEEDED(GetGuid(&session_id));
   }
 
   hr = InstallApps(is_machine_,
                    !args_.is_silent_set,  // is_interactive.
+                   args_.is_always_launch_cmd_set,
                    !args_.is_eula_required_set,  // is_eula_accepted.
                    args_.is_oem_set,
                    args_.is_offline_set,
@@ -1326,7 +1297,16 @@ HRESULT GoopdateImpl::DoUpdateAllApps(bool* has_ui_been_displayed ) {
   OPT_LOG(L1, (_T("[GoopdateImpl::DoUpdateAllApps]")));
   ASSERT1(has_ui_been_displayed);
 
-  HRESULT hr = S_OK;
+  bool is_interactive_update = !args_.is_silent_set;
+
+  // TODO(omaha): Consider moving InitializeClientSecurity calls inside
+  // install_apps.cc or maybe to update3_utils::CreateGoogleUpdate3Class().
+  HRESULT hr = InitializeClientSecurity();
+  if (FAILED(hr)) {
+    CORE_LOG(LE, (_T("[InitializeClientSecurity failed][%#x]"), hr));
+    return is_interactive_update ? hr : S_OK;
+  }
+
 #if defined(HAS_DEVICE_MANAGEMENT)
   // Make a best-effort attempt to register during UA processing to handle the
   // following cases:
@@ -1339,7 +1319,7 @@ HRESULT GoopdateImpl::DoUpdateAllApps(bool* has_ui_been_displayed ) {
   // installs/updates and policy fetch. Once we have the Firebase Messaging
   // feature solidified, we can move the policy fetch logic over there.
   if (is_machine_) {
-    hr = dm_client::RegisterIfNeeded(DmStorage::Instance());
+    hr = dm_client::RegisterIfNeeded(DmStorage::Instance(), false);
     if (FAILED(hr)) {
       OPT_LOG(LE, (_T("[Registration failed][%#x]"), hr));
       // Emit to the Event Log. The entry will include details by way of
@@ -1359,8 +1339,6 @@ HRESULT GoopdateImpl::DoUpdateAllApps(bool* has_ui_been_displayed ) {
   }
 #endif  // defined(HAS_DEVICE_MANAGEMENT)
 
-  bool is_interactive_update = !args_.is_silent_set;
-
   // TODO(omaha3): Interactive is used as an indication of an on-demand request.
   // It might also be useful to allow on-demand silent update requests.
   // This was a request when we added the ability to disable updates.
@@ -1373,14 +1351,6 @@ HRESULT GoopdateImpl::DoUpdateAllApps(bool* has_ui_been_displayed ) {
   if (is_on_demand && install_source.IsEmpty()) {
     // Set an install source for interactive/on-demand update all apps.
     install_source = kCmdLineInstallSource_OnDemandUA;
-  }
-
-  // TODO(omaha): Consider moving InitializeClientSecurity calls inside
-  // install_apps.cc or maybe to update3_utils::CreateGoogleUpdate3Class().
-  hr = InitializeClientSecurity();
-  if (FAILED(hr)) {
-    ASSERT1(false);
-    return is_interactive_update ? hr : S_OK;
   }
 
   hr = UpdateApps(is_machine_,
@@ -1474,32 +1444,6 @@ HRESULT GoopdateImpl::HandleHealthCheck() {
   return S_OK;
 }
 
-HRESULT GoopdateImpl::HandleRegisterMsiHelper() {
-  const TCHAR* key_name = is_machine_ ? MACHINE_REG_UPDATE : USER_REG_UPDATE;
-  DWORD is_registered(0);
-  VERIFY1(SUCCEEDED(RegKey::GetValue(key_name,
-                                     kRegValueIsMSIHelperRegistered,
-                                     &is_registered)));
-  if (is_registered) {
-    return S_OK;
-  }
-
-  SetupGoogleUpdate setup_google_update(is_machine_, false);
-  HRESULT hr = setup_google_update.InstallMsiHelper();
-  if (FAILED(hr)) {
-    CORE_LOG(LE, (_T("[InstallMsiHelper failed][%#x]"), hr));
-    ASSERT1(HRESULT_FROM_WIN32(ERROR_INSTALL_SERVICE_FAILURE) == hr ||
-            HRESULT_FROM_WIN32(ERROR_INSTALL_ALREADY_RUNNING) == hr);
-    return hr;
-  }
-
-  VERIFY1(SUCCEEDED(RegKey::SetValue(key_name,
-                                     kRegValueIsMSIHelperRegistered,
-                                     static_cast<DWORD>(1))));
-
-  return S_OK;
-}
-
 // TODO(omaha3): In Omaha 2, this was also called when /ig failed. There is a
 // separate call to UninstallSelf for /install in goopdate.cc. Should we call
 // this instead to ensure we ping? Should we try to only call from one location?
@@ -1556,7 +1500,7 @@ HRESULT GoopdateImpl::UninstallIfNecessary() {
   }
 }
 
-bool GoopdateImpl::ShouldSetBackgroundPriority(CommandLineMode mode) {
+bool GoopdateImpl::ShouldSetBelowNormalPriority(CommandLineMode mode) {
   switch (mode) {
     // Modes that should be mindful about impacting foreground processes.
     case COMMANDLINE_MODE_REPORTCRASH:
@@ -1572,13 +1516,11 @@ bool GoopdateImpl::ShouldSetBackgroundPriority(CommandLineMode mode) {
     case COMMANDLINE_MODE_NOARGS:
     case COMMANDLINE_MODE_REGSERVER:
     case COMMANDLINE_MODE_UNREGSERVER:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     case COMMANDLINE_MODE_RECOVER:
     case COMMANDLINE_MODE_SERVICE_REGISTER:
     case COMMANDLINE_MODE_SERVICE_UNREGISTER:
     case COMMANDLINE_MODE_INSTALL:
-    case COMMANDLINE_MODE_WEBPLUGIN:
     case COMMANDLINE_MODE_REGISTER_PRODUCT:
     case COMMANDLINE_MODE_UNREGISTER_PRODUCT:
     case COMMANDLINE_MODE_PING:
@@ -1590,7 +1532,6 @@ bool GoopdateImpl::ShouldSetBackgroundPriority(CommandLineMode mode) {
     case COMMANDLINE_MODE_MEDIUM_SERVICE:
     case COMMANDLINE_MODE_HANDOFF_INSTALL:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
       return false;
 
     default:
@@ -1599,16 +1540,14 @@ bool GoopdateImpl::ShouldSetBackgroundPriority(CommandLineMode mode) {
   }
 }
 
-HRESULT GoopdateImpl::SetBackgroundPriorityIfNeeded(CommandLineMode mode) {
-  if (!ShouldSetBackgroundPriority(mode)) {
+HRESULT GoopdateImpl::SetBelowNormalPriorityIfNeeded(CommandLineMode mode) {
+  if (!ShouldSetBelowNormalPriority(mode)) {
     return S_FALSE;
   }
 
-  const DWORD priority =
-      vista_util::IsVistaOrLater() ? PROCESS_MODE_BACKGROUND_BEGIN :
-                                     BELOW_NORMAL_PRIORITY_CLASS;
-  const BOOL succeeded = ::SetPriorityClass(::GetCurrentProcess(), priority);
-  return succeeded ? S_OK : HRESULTFromLastError();
+  return ::SetPriorityClass(::GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS)
+             ? S_OK
+             : HRESULTFromLastError();
 }
 
 HRESULT GoopdateImpl::InstallExceptionHandler() {
@@ -1668,7 +1607,7 @@ HRESULT GoopdateImpl::RegisterForDeviceManagement() {
     return S_FALSE;
   }
 
-  HRESULT hr = dm_client::RegisterIfNeeded(dm_storage);
+  HRESULT hr = dm_client::RegisterIfNeeded(dm_storage, true);
 
   // Exit early if no work was needed.
   if (hr == S_FALSE) {
@@ -1827,24 +1766,13 @@ bool IsMachineProcess(CommandLineMode mode,
       ASSERT1(goopdate_utils::IsRunningFromOfficialGoopdateDir(false) ||
               goopdate_utils::IsRunningFromOfficialGoopdateDir(true) ||
               _T("omaha_unittest.exe") == app_util::GetCurrentModuleName() ||
-              _T("GoogleUpdate_unsigned.exe") ==
+              MAIN_EXE_BASE_NAME _T("_unsigned.exe") ==
                   app_util::GetModuleName(NULL));  // Running in debugger.
       return is_running_from_official_machine_directory;
 
     // The broker forwarder is elevatable and always runs as the user it was
     // created as.
     case COMMANDLINE_MODE_COMBROKER:
-      return is_running_from_official_machine_directory;
-
-    // The following always runs as the user and is user-initiated.
-    case COMMANDLINE_MODE_WEBPLUGIN:
-      // The install location determines user vs. machine.
-      // This may not be the desired value when doing a cross-install or using
-      // the opposite plugin (i.e. user plugin is often used before the machine
-      // one).
-      ASSERT1(goopdate_utils::IsRunningFromOfficialGoopdateDir(false) ||
-              goopdate_utils::IsRunningFromOfficialGoopdateDir(true) ||
-              _T("omaha_unittest.exe") == app_util::GetCurrentModuleName());
       return is_running_from_official_machine_directory;
 
     // The following all run silently as the user for user installs or Local
@@ -1901,7 +1829,6 @@ bool IsMachineProcess(CommandLineMode mode,
     case COMMANDLINE_MODE_UNINSTALL:
     case COMMANDLINE_MODE_PING:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
       ASSERT1(goopdate_utils::IsRunningFromOfficialGoopdateDir(false) ||
               goopdate_utils::IsRunningFromOfficialGoopdateDir(true) ||
               _T("omaha_unittest.exe") == app_util::GetCurrentModuleName());
@@ -1911,7 +1838,6 @@ bool IsMachineProcess(CommandLineMode mode,
     // in the wild.
     case COMMANDLINE_MODE_NOARGS:
     case COMMANDLINE_MODE_UNKNOWN:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     default:
       return is_running_from_official_machine_directory;
@@ -1937,12 +1863,10 @@ bool CanDisplayUi(CommandLineMode mode, bool is_silent) {
     case COMMANDLINE_MODE_SERVICE:
     case COMMANDLINE_MODE_REGSERVER:
     case COMMANDLINE_MODE_UNREGSERVER:
-    case COMMANDLINE_MODE_NETDIAGS:
     case COMMANDLINE_MODE_CRASH:
     case COMMANDLINE_MODE_REPORTCRASH:
     case COMMANDLINE_MODE_UPDATE:
     case COMMANDLINE_MODE_RECOVER:
-    case COMMANDLINE_MODE_WEBPLUGIN:
     case COMMANDLINE_MODE_CODE_RED_CHECK:
     case COMMANDLINE_MODE_COMSERVER:
     case COMMANDLINE_MODE_REGISTER_PRODUCT:
@@ -1956,7 +1880,6 @@ bool CanDisplayUi(CommandLineMode mode, bool is_silent) {
     case COMMANDLINE_MODE_UNINSTALL:
     case COMMANDLINE_MODE_PING:
     case COMMANDLINE_MODE_HEALTH_CHECK:
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
     default:
       // These modes are always silent.
       return false;
@@ -1965,7 +1888,7 @@ bool CanDisplayUi(CommandLineMode mode, bool is_silent) {
 
 }  // namespace internal
 
-Goopdate* Goopdate::instance_              = NULL;
+Goopdate* Goopdate::instance_ = nullptr;
 
 Goopdate& Goopdate::Instance() {
   ASSERT1(instance_);
@@ -1994,10 +1917,10 @@ HRESULT Goopdate::Main(HINSTANCE instance,
   return impl_->Main(instance, cmd_line, cmd_show);
 }
 
-HRESULT Goopdate::QueueUserWorkItem(UserWorkItem* work_item,
+HRESULT Goopdate::QueueUserWorkItem(std::unique_ptr<UserWorkItem> work_item,
                                     DWORD coinit_flags,
                                     uint32 flags) {
-  return impl_->QueueUserWorkItem(work_item, coinit_flags, flags);
+  return impl_->QueueUserWorkItem(std::move(work_item), coinit_flags, flags);
 }
 
 void Goopdate::Stop() {

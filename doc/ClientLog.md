@@ -27,7 +27,6 @@ Non-opt builds (dbg-win and coverage-win) allow provide much more logging and ha
 [LoggingLevel]
 LC_CORE=5
 LC_NET=4
-LC_PLUGIN=3
 LC_SERVICE=3
 LC_SETUP=3
 LC_SHELL=3
@@ -38,7 +37,6 @@ LC_REPORT=3
 
 [LoggingSettings]
 EnableLogging=1
-LogFilePath="C:\foo\GoogleUpdate.log"
 MaxLogFileSize=10000000
 
 ShowTime=1

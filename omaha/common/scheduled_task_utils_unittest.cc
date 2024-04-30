@@ -39,7 +39,7 @@ namespace {
 const int kMaxWaitForProcessMs                  = 120000;
 
 const TCHAR kLongRunningProcessesRelativePath[] =
-    _T("unittest_support\\does_not_shutdown\\GoogleUpdate.exe");
+    _T("unittest_support\\does_not_shutdown\\") MAIN_EXE_BASE_NAME _T(".exe");
 
 CString GetLongRunningProcessPath() {
   const CString module_dir(app_util::GetCurrentModuleDirectory());
@@ -210,8 +210,12 @@ TEST_P(ScheduledTaskUtilsV2Test, CreateScheduledTaskXml) {
     principal_attributes = _T("<LogonType>InteractiveToken</LogonType>\n");
   }
 
+  CString quoted_task_path(task_path);
+  EnclosePath(&quoted_task_path);
+
   CString expected_task_xml;
-  SafeCStringFormat(&expected_task_xml,
+  SafeCStringFormat(
+      &expected_task_xml,
       _T("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n")
       _T("<Task version=\"1.2\"\n")
       _T("  xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\n")
@@ -238,8 +242,12 @@ TEST_P(ScheduledTaskUtilsV2Test, CreateScheduledTaskXml) {
       _T("  <Settings>\n")
       _T("    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n")
       _T("    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n")
+      _T("    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\n")
       _T("    <StartWhenAvailable>true</StartWhenAvailable>\n")
       _T("    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>\n")
+      _T("    <IdleSettings>\n")
+      _T("      <StopOnIdleEnd>false</StopOnIdleEnd>\n")
+      _T("    </IdleSettings>\n")
       _T("    <Enabled>true</Enabled>\n")
       _T("    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n")
       _T("    <WakeToRun>false</WakeToRun>\n")
@@ -259,7 +267,7 @@ TEST_P(ScheduledTaskUtilsV2Test, CreateScheduledTaskXml) {
       hourly_trigger,
       user_id,
       principal_attributes,
-      task_path,
+      quoted_task_path,
       kScheduledTaskParameters);
 
   CString task_xml;
@@ -308,7 +316,6 @@ TEST_P(ScheduledTaskUtilsV2Test, InstallScheduledTask) {
 
 
 TEST(ScheduledTaskUtilsTest, GoopdateTasks) {
-  const CString task_name = GetCurrentTaskNameCore(IsUserAdmin());
   const CString task_path = GetLongRunningProcessPath();
 
   // Install/uninstall.
@@ -316,6 +323,7 @@ TEST(ScheduledTaskUtilsTest, GoopdateTasks) {
   EXPECT_SUCCEEDED(UninstallGoopdateTasks(IsUserAdmin()));
 
   EXPECT_SUCCEEDED(InstallGoopdateTasks(task_path, IsUserAdmin()));
+  const CString task_name = GetCurrentTaskNameCore(IsUserAdmin());
   EXPECT_FALSE(Instance().HasScheduledTaskEverRun(task_name));
 
   // Start and stop.
@@ -377,12 +385,12 @@ TEST(ScheduledTaskUtilsTest, V1OnlyGoopdateTaskInUseOverinstall) {
 }
 
 TEST(ScheduledTaskUtilsTest, GetExitCodeGoopdateTaskUA) {
-  const CString task_name = GetCurrentTaskNameUA(IsUserAdmin());
   const CString task_path = ConcatenatePath(
                                 app_util::GetCurrentModuleDirectory(),
                                 _T("unittest_support\\SaveArguments.exe"));
 
   EXPECT_SUCCEEDED(InstallGoopdateTasks(task_path, IsUserAdmin()));
+  const CString task_name = GetCurrentTaskNameUA(IsUserAdmin());
   EXPECT_EQ(SCHED_S_TASK_HAS_NOT_RUN,
             GetExitCodeGoopdateTaskUA(IsUserAdmin()));
   EXPECT_FALSE(Instance().HasScheduledTaskEverRun(task_name));

@@ -14,14 +14,18 @@
 // ========================================================================
 
 #include "omaha/goopdate/update_response_utils.h"
+
 #include <algorithm>
+#include <regex>
+#include <string>
+#include <vector>
+
 #include "omaha/base/debug.h"
 #include "omaha/base/error.h"
 #include "omaha/base/logging.h"
-#include "omaha/base/atl_regexp.h"
 #include "omaha/base/system_info.h"
-#include "omaha/common/lang.h"
 #include "omaha/common/experiment_labels.h"
+#include "omaha/common/lang.h"
 #include "omaha/common/xml_const.h"
 #include "omaha/common/xml_parser.h"
 #include "omaha/goopdate/model.h"
@@ -38,7 +42,7 @@ namespace {
 // version and it comes from the update response, or with the a dotted quad,
 // which is the OS version of the host.
 ULONGLONG OSVersionFromString(const CString& s) {
-  if (AtlRE::PartialMatch(s, AtlRE(_T("^\\d+\\.\\d+$")))) {
+  if (std::regex_search(std::wstring(s), std::wregex(_T("^\\d+\\.\\d+$")))) {
     // Convert from "x.y" to "x.y.0.0" format so we can use the existing
     // VersionFromString utility function.
     return VersionFromString(s + _T(".0.0"));
@@ -46,8 +50,8 @@ ULONGLONG OSVersionFromString(const CString& s) {
 
   // The string is a dotted quad version. VersionFromString handles the error if
   // the parameter is something else.
-  ASSERT1(AtlRE::PartialMatch(s, AtlRE(_T("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))));
-
+  ASSERT1(std::regex_search(std::wstring(s),
+                            std::wregex(_T("^\\d+\\.\\d+\\.\\d+\\.\\d+$"))));
   return VersionFromString(s);
 }
 
@@ -55,13 +59,59 @@ bool IsPlatformCompatible(const CString& platform) {
   return platform.IsEmpty() || !platform.CompareNoCase(kPlatformWin);
 }
 
-bool IsArchCompatible(const CString& arch) {
-  const CString current_arch(xml::ConvertProcessorArchitectureToString(
-                                 SystemInfo::GetProcessorArchitecture()));
-  return arch.IsEmpty() ||
-         !arch.CompareNoCase(current_arch) ||
-         (arch == xml::value::kArchIntel &&
-         current_arch == xml::value::kArchAmd64);
+// Checks if the current architecture is compatible with the entries in
+// `arch_list`. `arch_list` can be a single entry, or multiple entries separated
+// with `,`. Entries prefixed with `-` (negative entries) indicate
+// non-compatible hosts. Non-prefixed entries indicate compatible guests.
+//
+// Returns `true` if:
+// * `arch_list` is empty, or
+// * none of the negative entries within `arch_list` match the current host
+//   architecture exactly, and there are no non-negative entries, or
+// * one of the non-negative entries within `arch_list` matches the current
+//   architecture, or is compatible with the current architecture (i.e., it is a
+//   compatible guest for the current host) as determined by
+//   `::IsWow64GuestMachineSupported()`.
+//   * If `::IsWow64GuestMachineSupported()` is not available, returns `true`
+//     if `arch` is x86.
+//
+// Examples:
+// * `arch_list` == "x86": returns `true` if run on all systems, because Omaha3
+//   is x86, and is running the logic to determine compatibility).
+// * `arch_list` == "x64": returns `true` if run on x64 or many arm64 systems.
+// * `arch_list` == "x86,x64,-arm64": returns `false` if the underlying host is
+// arm64.
+// * `arch_list` == "-arm64": returns `false` if the underlying host is arm64.
+bool IsArchCompatible(const CString& arch_list) {
+  std::vector<CString> architectures;
+  int pos = 0;
+  do {
+    const CString arch = arch_list.Tokenize(_T(","), pos).Trim().MakeLower();
+    if (!arch.IsEmpty()) {
+      architectures.push_back(arch);
+    }
+  } while (pos != -1);
+
+  if (architectures.empty()) {
+    return true;
+  }
+
+  std::sort(architectures.begin(), architectures.end());
+  if (std::find(architectures.begin(), architectures.end(),
+                _T('-') + SystemInfo::GetArchitecture().MakeLower()) !=
+      architectures.end()) {
+    return false;
+  }
+
+  architectures.erase(
+      std::remove_if(architectures.begin(), architectures.end(),
+                     [](const CString& arch) { return arch[0] == '-'; }),
+      architectures.end());
+
+  return architectures.empty() ||
+         std::find_if(architectures.begin(), architectures.end(),
+                      SystemInfo::IsArchitectureSupported) !=
+             architectures.end();
 }
 
 bool IsOSVersionCompatible(const CString& min_os_version) {
@@ -189,7 +239,7 @@ HRESULT BuildApp(const xml::UpdateResponse* update_response,
   ASSERT1(response_app);
   const xml::response::UpdateCheck& update_check = response_app->update_check;
 
-  VERIFY1(SUCCEEDED(app->put_ttToken(CComBSTR(update_check.tt_token))));
+  VERIFY_SUCCEEDED(app->put_ttToken(CComBSTR(update_check.tt_token)));
 
   Cohort cohort;
   cohort.cohort = response_app->cohort;
@@ -211,10 +261,9 @@ HRESULT BuildApp(const xml::UpdateResponse* update_response,
   for (size_t i = 0; i < update_check.install_manifest.packages.size(); ++i) {
     const xml::InstallPackage& package(
         update_check.install_manifest.packages[i]);
-    FileHash hash;
-    hash.sha1 = package.hash_sha1;
-    hash.sha256 = package.hash_sha256;
-    HRESULT hr = next_version->AddPackage(package.name, package.size, hash);
+    HRESULT hr = next_version->AddPackage(package.name,
+                                          package.size,
+                                          package.hash_sha256);
     if (FAILED(hr)) {
       return hr;
     }
@@ -266,7 +315,7 @@ xml::UpdateResponseResult GetResult(const xml::UpdateResponse* update_response,
 
   if (!response_app) {
     CORE_LOG(L1, (_T("[UpdateResponse::GetResult][app not found][%s]"), appid));
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_UNKNOWN_APPLICATION, &text)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_UNKNOWN_APPLICATION, &text));
     return std::make_pair(GOOPDATE_E_NO_SERVER_RESPONSE, text);
   }
 
@@ -285,50 +334,50 @@ xml::UpdateResponseResult GetResult(const xml::UpdateResponse* update_response,
 
   // noupdate
   if (_tcsicmp(xml::response::kStatusNoUpdate, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_NO_UPDATE_RESPONSE, &text)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_NO_UPDATE_RESPONSE, &text));
     return std::make_pair(GOOPDATE_E_NO_UPDATE_RESPONSE, text);
   }
 
   // "restricted"
   if (_tcsicmp(xml::response::kStatusRestrictedExportCountry, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_RESTRICTED_RESPONSE_FROM_SERVER,
-                                           &text)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_RESTRICTED_RESPONSE_FROM_SERVER,
+                                           &text));
     return std::make_pair(GOOPDATE_E_RESTRICTED_SERVER_RESPONSE, text);
   }
 
   // "error-UnKnownApplication"
   if (_tcsicmp(xml::response::kStatusUnKnownApplication, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_UNKNOWN_APPLICATION, &text)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_UNKNOWN_APPLICATION, &text));
     return std::make_pair(GOOPDATE_E_UNKNOWN_APP_SERVER_RESPONSE, text);
   }
 
   // "error-hwnotsupported"
   if (_tcsicmp(xml::response::kStatusHwNotSupported, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.FormatMessage(&text,
+    VERIFY_SUCCEEDED(formatter.FormatMessage(&text,
                                               IDS_HW_NOT_SUPPORTED,
-                                              app_name)));
+                                              app_name));
     return std::make_pair(GOOPDATE_E_HW_NOT_SUPPORTED, text);
   }
 
   // "error-osnotsupported"
   if (_tcsicmp(xml::response::kStatusOsNotSupported, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.LoadString(IDS_OS_NOT_SUPPORTED, &text)));
+    VERIFY_SUCCEEDED(formatter.LoadString(IDS_OS_NOT_SUPPORTED, &text));
     return std::make_pair(GOOPDATE_E_OS_NOT_SUPPORTED, text);
   }
 
   // "error-internal"
   if (_tcsicmp(xml::response::kStatusInternalError, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.FormatMessage(&text,
+    VERIFY_SUCCEEDED(formatter.FormatMessage(&text,
                                               IDS_NON_OK_RESPONSE_FROM_SERVER,
-                                              status)));
+                                              status));
     return std::make_pair(GOOPDATE_E_INTERNAL_ERROR_SERVER_RESPONSE, text);
   }
 
   // "error-hash"
   if (_tcsicmp(xml::response::kStatusHashError, status) == 0) {
-    VERIFY1(SUCCEEDED(formatter.FormatMessage(&text,
+    VERIFY_SUCCEEDED(formatter.FormatMessage(&text,
                                               IDS_NON_OK_RESPONSE_FROM_SERVER,
-                                              status)));
+                                              status));
     return std::make_pair(GOOPDATE_E_SERVER_RESPONSE_NO_HASH, text);
   }
 
@@ -338,16 +387,16 @@ xml::UpdateResponseResult GetResult(const xml::UpdateResponse* update_response,
     // just the publisher name. If it was a link, we could use point to a
     // redirect URL and provide the app GUID rather than somehow obtaining the
     // app-specific URL.
-    VERIFY1(SUCCEEDED(formatter.FormatMessage(&text,
+    VERIFY_SUCCEEDED(formatter.FormatMessage(&text,
                                               IDS_INSTALLER_OLD,
-                                              kShortCompanyName)));
+                                              kShortCompanyName));
     return std::make_pair(GOOPDATE_E_SERVER_RESPONSE_UNSUPPORTED_PROTOCOL,
                           text);
   }
 
-  VERIFY1(SUCCEEDED(formatter.FormatMessage(&text,
+  VERIFY_SUCCEEDED(formatter.FormatMessage(&text,
                                             IDS_NON_OK_RESPONSE_FROM_SERVER,
-                                            status)));
+                                            status));
   return std::make_pair(GOOPDATE_E_UNKNOWN_SERVER_RESPONSE, text);
 }
 
@@ -399,7 +448,7 @@ xml::UpdateResponseResult CheckSystemRequirements(
     return std::make_pair(S_OK, CString());
   }
 
-  VERIFY1(SUCCEEDED(formatter.LoadString(IDS_OS_NOT_SUPPORTED, &text)));
+  VERIFY_SUCCEEDED(formatter.LoadString(IDS_OS_NOT_SUPPORTED, &text));
   return std::make_pair(GOOPDATE_E_OS_NOT_SUPPORTED, text);
 }
 

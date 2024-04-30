@@ -4,47 +4,50 @@ These instructions are intended to assist the would-be Omaha developer with sett
 
 We are striving to make the code build with the latest Windows toolchain from Microsoft. Since there is no continuous integration for this project, the code may not build using previous versions of the toolchain.
 
-#### Currently, the supported toolchain is Visual Studio 2019 Update 16.1.1 and Windows SDK 10.0.17763.0. ####
+#### Currently, the supported toolchain is Visual Studio 2022 Update 17.8.3 and Windows SDK 10.0.22621.0. ####
 
-Visual Studio 2017 Update 15.9.12 should work too.
+The updater runs on Windows 7, 8, and 10. Windows XP is not supported in the current build configuration due to a number of issues, such as thread-safe initializing of static local variables, etc.
 
 # Required Downloads/Tools #
 
 The following packages are required to build Omaha:
   * A copy of the Omaha source code.  This can be done by cloning this repository.
-  * Microsoft Visual Studio 2017 or 2019. The free Visual Studio Community edition is sufficient to build.
+  * Microsoft Visual Studio 2022. The free Visual Studio Community edition is sufficient to build.
     * Download [here](https://visualstudio.microsoft.com/downloads)
-  * ATL Server headers
-    * Download [here](http://atlserver.codeplex.com). Omaha needs this library for regular expression support.
   * Windows 10 SDK.
-    * Download Windows 10 SDK [here](https://dev.windows.com/en-us/downloads/windows-10-sdk).
-  * Microsoft .NET Framework 2.0
-    * This should be pre-installed on Windows Vista and Windows 7. This old version of SDK is needed for click-once compatibility with Windows XP systems.
-    * To verify, see if the file %WINDIR%\Microsoft.NET\Framework\v2.0.50727\csc.exe exists on your system.
-    * Download [here](https://www.microsoft.com/en-us/download/details.aspx?id=19988).
-  * The Windows Template Library (WTL)
+    * Visual Studio copy of Windows 10 SDK is sufficient to build with, if desired.
+    * Optionally, download and intall Windows 10 SDK [here](https://dev.windows.com/en-us/downloads/windows-10-sdk).
+  * The Windows Template Library (WTL) - WTL 10.0.10320 Release
     * Download WTL [here](http://sourceforge.net/projects/wtl/).
+    * hammer.bat has `OMAHA_WTL_DIR` set to `C:\wtl\files`. Change this if you unpacked to a different location.
   * The Windows Install XML (WiX) Toolkit, version 3.0 or later.
     * Download any of the v3 binaries packages [here](http://wix.sourceforge.net/).
+    * Set the `WIX` environment variable to the directory where you unpacked WiX.
   * Python 2.7.x
     * Download Python [here](https://www.python.org/downloads/release/python-2716).  It can coexist with newer Python installs on a system.
     * You'll also need the pywin32 (Python for Windows) extensions for Python 2.7.
       - You can install with pip: `> python -m pip install pywin32` - assuming `python` is added to your `PATH` environmental variable.
       - It can also be downloaded [here](https://github.com/mhammond/pywin32/releases/download/b224/pywin32-224.win-amd64-py2.7.exe).
+    * The `OMAHA_PYTHON_DIR` is set to `C:\Python27`. Change this if you installed to a different location.
   * SCons 1.3.x (Be sure to use **1.3**, the 2.0 series is not backwards-compatible!)
     * Download SCons [here](http://sourceforge.net/projects/scons/files/scons/1.3.1/).
+    * Change this line in hammer.bat if you installed to a different location: `SCONS_DIR=C:\Python27\scons-1.3.1`.
   * Google Software Construction Toolkit
-    * Get the SCT source [here](http://code.google.com/p/swtoolkit/), either via direct download or via SVN checkout.
+    * Get the SCT source [here](https://code.google.com/archive/p/swtoolkit/downloads), either via direct download or via SVN checkout.
+    * Change this line in hammer.bat if you installed to a different location: `set SCT_DIR=C:\swtoolkit`.
   * The GO programming language
     * Download [here](https://golang.org/dl/) 
-  * Google Protocol Buffers (3.6.0 or higher) [here](https://github.com/google/protobuf/releases).
-    * From the [release page](https://github.com/google/protobuf/releases), download the zip file protoc-$VERSION-win32.zip. It contains the protoc binary. Unzip the contents under C:\protobuf. After that, download the zip file protobuf-cpp-$VERSION.zip. Unzip the "src" sub-directory contents to C:\protobuf\src. If other directory is used, please edit the environment variables in the hammer.bat, specifically, OMAHA_PROTOBUF_BIN_DIR and OMAHA_PROTOBUF_SRC_DIR.
+    * Change this line in hammer.bat if you installed to a different location: `set GOROOT=C:\go`.
+  * Google Protocol Buffers (currently tested with v3.17.3) [here](https://github.com/protocolbuffers/protobuf/releases).
+    * From the [release page](https://github.com/protocolbuffers/protobuf/releases), download the zip file `protoc-$VERSION-win32.zip`. It contains the protoc binary. Unzip the contents under `C:\protobuf`. After that, download the zip file `protobuf-cpp-$VERSION.zip`. Unzip the `src` sub-directory contents to `C:\protobuf\src`. If other directory is used, please edit the environment variables in the hammer.bat, specifically, `OMAHA_PROTOBUF_BIN_DIR` and `OMAHA_PROTOBUF_SRC_DIR`.
   * Third-party dependencies:
-    * breakpad. Source code [here](https://code.google.com/p/google-breakpad/source/checkout)
-    * googletest. Source code [here](https://github.com/google/googletest). This includes both gtest and gmock frameworks.
-    * Use git clone, git svn clone, or other way to get the source code for these projects into the third_party directory in the root of this repository.
-    * libzip 1.5.2. Source code [here](https://libzip.org/download/libzip-1.5.2.tar.xz). Unzip the contents of libzip-1.5.2.tar.gz\libzip-1.5.2.tar\libzip-1.5.2\ into the directory googleclient\third_party\libzip. The Omaha repository contains two generated configuration files in `base\libzip`, or one could build the libzip library and generate the files. A change has been made to config.h to disable zip crypto `#undef HAVE_CRYPTO`, or else the zip code won't build because of a compile time bug.
-    * zlib 1.2.11. Source code [here](https://zlib.net/zlib-1.2.11.tar.gz). Unzip the contents of zlib-1.2.11.tar.gz\zlib-1.2.11.tar\zlib-1.2.11\ into the directory googleclient\third_party\zlib\v1_2_11.       
+    * breakpad. Download [here](https://github.com/google/breakpad/archive/refs/heads/main.zip). Tested with commit [11ec9c](https://github.com/google/breakpad/commit/11ec9c32888c06665b8838f709bd66c0be9789a6) from Dec 11, 2023.
+      - Unzip everything inside `breakpad-master.zip\breakpad-master` to `third_party\breakpad`.
+    * googletest. Download [here](https://github.com/google/googletest/archive/refs/heads/master.zip). Tested with commit [96eadf
+](https://github.com/google/googletest/commit/96eadf659fb75ecda943bd97413c71d4c17c4f43) from Dec 22, 2023. This includes both gtest and gmock frameworks.
+      - Unzip everything inside `googletest-master.zip\googletest-master` to `third_party\googletest`.
+    * libzip 1.7.3. Source code [here](https://libzip.org/download/libzip-1.7.3.tar.xz). Unzip the contents of `libzip-1.7.3.tar.gz\libzip-1.7.3.tar\libzip-1.7.3\` into the directory `third_party\libzip`. The Omaha repository contains two generated configuration files in `base\libzip`, or one could build the libzip library and generate the files. A change has been made to config.h to disable zip crypto `#undef HAVE_CRYPTO`, or else the zip code won't build because of a compile time bug.
+    * zlib 1.2.11. Source code [here](https://zlib.net/zlib-1.2.11.tar.gz). Unzip the contents of `zlib-1.2.11.tar.gz\zlib-1.2.11.tar\zlib-1.2.11\` into the directory `third_party\zlib`.
 
 To run the unit tests, one more package is needed. Download the Windows Sysinternals PSTools suite [here](https://technet.microsoft.com/en-us/sysinternals/bb897553) and save psexec.exe somewhere. Then, set a system environment variable named OMAHA_PSEXEC_DIR to the directory containing psexec.exe.
 
@@ -66,10 +69,11 @@ To run the unit tests, one more package is needed. Download the Windows Sysinter
       d---rwx---+ 1 sorin Domain Users   0 Jun 30 17:58 third_party
 
       d:\src\omahaopensource\omaha>ls -l third_party
-      total 16
-      d---rwx---+ 1 sorin          Domain Users 0 Jul 14 12:52 breakpad
-      drwxrwx---+ 1 Administrators Domain Users 0 Sep  1 11:52 googletest
-      d---rwx---+ 1 sorin          Domain Users 0 Aug  7 18:58 lzma
+      drwxrwxrwx 1 sorin sorin 4096 Mar  1 19:37 breakpad
+      drwxrwxrwx 1 sorin sorin 4096 Mar  1 19:41 googletest
+      drwxrwxrwx 1 sorin sorin 4096 Mar  1 19:58 libzip
+      drwxrwxrwx 1 sorin sorin 4096 Mar  1 16:30 lzma
+      drwxrwxrwx 1 sorin sorin 4096 Mar  1 20:07 zlib
 ```
 
 ## Environment Variables ##
@@ -91,7 +95,7 @@ A larger suite of unit tests is also included in the Omaha source.
 
 ## Running Unit Tests ##
 
-The Omaha build proces includes building an automated unit test suite, based on the [GTest](https://github.com/google/googletest) framework.  In order to run it, there are two pieces of preparation you must do:
+The Omaha build process includes building an automated unit test suite, based on the [GTest](https://github.com/google/googletest) framework.  In order to run it, there are two pieces of preparation you must do:
 
 * Create the following registry key: `HKEY_LOCAL_MACHINE\SOFTWARE\OmahaCompanyName\UpdateDev`. Then, add a string value named `TestSource` with the value `ossdev`. (Note: If you are on 64 bit Windows and are using `regedit` to create the value then you need to place it in `HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\OmahaCompanyName\UpdateDev`. [This allows 32 bit processes to read it.](https://support.microsoft.com/en-us/kb/305097)).
 * Download the Windows Sysinternals PSTools suite (available [here](http://technet.microsoft.com/en-us/sysinternals/bb897553)) and save `psexec.exe` somewhere. Then, set an environment variable named `OMAHA_PSEXEC_DIR` to the directory containing `psexec.exe`.

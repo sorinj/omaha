@@ -32,6 +32,7 @@ CommandLineBuilder::CommandLineBuilder(CommandLineMode mode)
       is_interactive_set_(false),
       is_machine_set_(false),
       is_silent_set_(false),
+      is_always_launch_cmd_set_(false),
       is_eula_required_set_(false),
       is_enterprise_set_(false) {
 }
@@ -54,6 +55,13 @@ void CommandLineBuilder::set_is_silent_set(bool is_silent_set) {
   ASSERT1(mode_ == COMMANDLINE_MODE_INSTALL ||
           mode_ == COMMANDLINE_MODE_HANDOFF_INSTALL);
   is_silent_set_ = is_silent_set;
+}
+
+void CommandLineBuilder::set_is_always_launch_cmd_set(
+    bool is_always_launch_cmd_set) {
+  ASSERT1(mode_ == COMMANDLINE_MODE_INSTALL ||
+          mode_ == COMMANDLINE_MODE_HANDOFF_INSTALL);
+  is_always_launch_cmd_set_ = is_always_launch_cmd_set;
 }
 
 void CommandLineBuilder::set_is_eula_required_set(bool is_eula_required_set) {
@@ -83,8 +91,7 @@ void CommandLineBuilder::set_app_args(const CString& app_args) {
 }
 
 void CommandLineBuilder::set_install_source(const CString& install_source) {
-  ASSERT1(mode_ == COMMANDLINE_MODE_WEBPLUGIN ||
-          mode_ == COMMANDLINE_MODE_INSTALL ||
+  ASSERT1(mode_ == COMMANDLINE_MODE_INSTALL ||
           mode_ == COMMANDLINE_MODE_HANDOFF_INSTALL ||
           mode_ == COMMANDLINE_MODE_UA);
   install_source_ = install_source;
@@ -106,17 +113,6 @@ void CommandLineBuilder::set_custom_info_filename(
     const CString& custom_info_filename) {
   ASSERT1(mode_ == COMMANDLINE_MODE_REPORTCRASH);
   custom_info_filename_ = custom_info_filename;
-}
-
-void CommandLineBuilder::set_webplugin_url_domain(
-    const CString& webplugin_url_domain) {
-  ASSERT1(mode_ == COMMANDLINE_MODE_WEBPLUGIN);
-  webplugin_url_domain_ = webplugin_url_domain;
-}
-
-void CommandLineBuilder::set_webplugin_args(const CString& webplugin_args) {
-  ASSERT1(mode_ == COMMANDLINE_MODE_WEBPLUGIN);
-  webplugin_args_ = webplugin_args;
 }
 
 void CommandLineBuilder::set_code_red_metainstaller_path(
@@ -165,9 +161,6 @@ CString CommandLineBuilder::GetCommandLineArgs() const {
     case COMMANDLINE_MODE_UNREGSERVER:
       cmd_line_args = GetUnregServer();
       break;
-    case COMMANDLINE_MODE_NETDIAGS:
-      cmd_line_args = GetNetDiags();
-      break;
     case COMMANDLINE_MODE_CRASH:
       cmd_line_args = GetCrash();
       break;
@@ -188,9 +181,6 @@ CString CommandLineBuilder::GetCommandLineArgs() const {
       break;
     case COMMANDLINE_MODE_RECOVER:
       cmd_line_args = GetRecover();
-      break;
-    case COMMANDLINE_MODE_WEBPLUGIN:
-      cmd_line_args = GetWebPlugin();
       break;
     case COMMANDLINE_MODE_CODE_RED_CHECK:
       cmd_line_args = GetCodeRedCheck();
@@ -230,9 +220,6 @@ CString CommandLineBuilder::GetCommandLineArgs() const {
       break;
     case COMMANDLINE_MODE_HEALTH_CHECK:
       cmd_line_args = GetHealthCheck();
-      break;
-    case COMMANDLINE_MODE_REGISTER_MSI_HELPER:
-      cmd_line_args = GetRegisterMsiHelper();
       break;
     case COMMANDLINE_MODE_UNKNOWN:
     default:
@@ -300,10 +287,6 @@ CString CommandLineBuilder::GetRegServer() const {
 
 CString CommandLineBuilder::GetUnregServer() const {
   return GetSingleSwitch(kCmdUnregServer);
-}
-
-CString CommandLineBuilder::GetNetDiags() const {
-  return GetSingleSwitch(kCmdLineNetDiags);
 }
 
 CString CommandLineBuilder::GetCrash() const {
@@ -385,6 +368,9 @@ CString CommandLineBuilder::GetInstall() const {
   if (is_silent_set_) {
     SafeCStringAppendFormat(&cmd_line, _T(" /%s"), kCmdLineSilent);
   }
+  if (is_always_launch_cmd_set_) {
+    SafeCStringAppendFormat(&cmd_line, _T(" /%s"), kCmdLineAlwaysLaunchCmd);
+  }
   if (is_enterprise_set_) {
     SafeCStringAppendFormat(&cmd_line, _T(" /%s"), kCmdLineEnterprise);
   }
@@ -420,6 +406,9 @@ CString CommandLineBuilder::GetHandoffInstall() const {
   }
   if (is_silent_set_) {
     SafeCStringAppendFormat(&cmd_line, _T(" /%s"), kCmdLineSilent);
+  }
+  if (is_always_launch_cmd_set_) {
+    SafeCStringAppendFormat(&cmd_line, _T(" /%s"), kCmdLineAlwaysLaunchCmd);
   }
   if (is_eula_required_set_) {
     SafeCStringAppendFormat(&cmd_line, _T(" /%s"), kCmdLineEulaRequired);
@@ -461,30 +450,6 @@ CString CommandLineBuilder::GetRecover() const {
   SafeCStringFormat(&cmd_line, _T("/%s %s"),
                     kCmdLineRecover,
                     code_red_metainstaller_path_.GetString());
-  return cmd_line;
-}
-
-CString CommandLineBuilder::GetWebPlugin() const {
-  ASSERT1(!webplugin_url_domain_.IsEmpty());
-  ASSERT1(!webplugin_args_.IsEmpty());
-  ASSERT1(!install_source_.IsEmpty());
-  if (webplugin_url_domain_.IsEmpty() ||
-      webplugin_args_.IsEmpty() ||
-      install_source_.IsEmpty()) {
-    return CString();
-  }
-  CString cmd_line;
-  CString enclosed_webplugin_url_domain_(webplugin_url_domain_);
-  CString enclosed_webplugin_args_(webplugin_args_);
-  EnclosePath(&enclosed_webplugin_url_domain_);
-  EnclosePath(&enclosed_webplugin_args_);
-  // TODO(omaha): Do we want this to handle the urlencoding for us?
-  SafeCStringFormat(&cmd_line, _T("/%s %s %s /%s %s"),
-                    kCmdLineWebPlugin,
-                    enclosed_webplugin_url_domain_.GetString(),
-                    enclosed_webplugin_args_.GetString(),
-                    kCmdLineInstallSource,
-                    install_source_.GetString());
   return cmd_line;
 }
 
@@ -531,10 +496,6 @@ CString CommandLineBuilder::GetPing() const {
 
 CString CommandLineBuilder::GetHealthCheck() const {
   return GetSingleSwitch(kCmdLineHealthCheck);
-}
-
-CString CommandLineBuilder::GetRegisterMsiHelper() const {
-  return GetSingleSwitch(kCmdLineRegisterMsiHelper);
 }
 
 }  // namespace omaha

@@ -122,7 +122,7 @@ char* ReadTag(TagExtractor* extractor) {
     return NULL;
   }
 
-  // Do a sanity check of the tag string. The double quote '"'
+  // Do a check of the tag string. The double quote '"'
   // is a special character that should not be included in the tag string.
   for (const char* tag_char = tag_buffer.get(); *tag_char; ++tag_char) {
     if (*tag_char == '"') {
@@ -310,15 +310,8 @@ class MetaInstaller {
       return false;
     }
 
-    // TODO(omaha3): When we refactor base into minibase, replace this with a
-    // call to GetTempFilenameAt() from utils.h. Do the same for the other call
-    // to GetTempFileName() in this module.
-    CString temp_dir;
-    DWORD result = ::GetTempFileName(parent_dir,
-                                     _T("GUM"),
-                                     0,  // form a unique filename
-                                     CStrBuf(temp_dir, MAX_PATH));
-    if (!result || (result == ERROR_BUFFER_OVERFLOW)) {
+    const CString temp_dir = GetTempFilenameAt(parent_dir, _T("GUM"));
+    if (temp_dir.IsEmpty()) {
       return false;
     }
 
@@ -331,29 +324,20 @@ class MetaInstaller {
     return true;
   }
 
-  // Create a temp directory under %ProgramFiles%. To avoid possible issues with
-  // anti-malware heuristics, this function returns early and does not try to
-  // create a directory if the user is not an admin.
-  bool CreateProgramFilesTempDir() {
-    if (!::IsUserAnAdmin()) {
+  // Create a temp directory under %ProgramFiles%\Google\Temp. To avoid possible
+  // issues with anti-malware heuristics, this function returns early and does
+  // not try to create a directory if the user is not an admin.
+  bool CreateMachineTempDir() {
+    const CString google_update_temp_dir(GetSecureSystemTempDir());
+    if (google_update_temp_dir.IsEmpty()) {
       return false;
     }
 
-    CString program_files_dir;
-    HRESULT hr = ::SHGetFolderPath(NULL,
-                                   CSIDL_PROGRAM_FILES,
-                                   NULL,
-                                   SHGFP_TYPE_CURRENT,
-                                   CStrBuf(program_files_dir, MAX_PATH));
-    if (FAILED(hr)) {
+    if (!CreateTempSubdirectory(google_update_temp_dir)) {
       return false;
     }
 
-    if (!CreateTempSubdirectory(program_files_dir)) {
-      return false;
-    }
-
-    temp_root_dir_ = program_files_dir;
+    temp_root_dir_ = google_update_temp_dir;
     return true;
   }
 
@@ -376,19 +360,20 @@ class MetaInstaller {
   }
 
   // Creates a temp directory to hold the embedded setup files. First attempts
-  // creating the directory under %ProgramFiles%, and if that fails, creates
+  // creating the directory under a secure path, and if that fails, creates
   // under the user's %TMP% directory.
   int CreateUniqueTempDirectory() {
-    return CreateProgramFilesTempDir() || CreateUserTempDir() ? 0 : -1;
+    return (::IsUserAnAdmin() ? CreateMachineTempDir()
+                              : CreateUserTempDir())
+               ? 0
+               : -1;
   }
 
   HANDLE ExtractTarballToTempLocation() {
     HANDLE tarball_file = INVALID_HANDLE_VALUE;
-    TCHAR tarball_filename[MAX_PATH] = {0};
-    if (::GetTempFileName(temp_root_dir_,
-                          _T("GUT"),
-                          0,  // form a unique filename
-                          tarball_filename)) {
+    const CString tarball_filename =
+        GetTempFilenameAt(temp_root_dir_, _T("GUT"));
+    if (!tarball_filename.IsEmpty()) {
       files_to_delete_.Add(tarball_filename);
       HRSRC res_info = ::FindResource(NULL,
                                       MAKEINTRESOURCE(IDR_PAYLOAD),
@@ -657,4 +642,3 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
   int result = mi.ExtractAndRun();
   return result;
 }
-

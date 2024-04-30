@@ -16,6 +16,7 @@
 // TODO(omaha): why so many dependencies for this unit test?
 
 #include <atlstr.h>
+#include <vector>
 #include <windows.h>
 
 #include "omaha/base/app_util.h"
@@ -34,7 +35,6 @@
 #include "omaha/goopdate/app_state_waiting_to_download.h"
 #include "omaha/goopdate/app_unittest_base.h"
 #include "omaha/goopdate/download_manager.h"
-#include "omaha/goopdate/file_hash.h"
 #include "omaha/testing/unit_test.h"
 #include "omaha/third_party/smartany/scoped_any.h"
 
@@ -45,24 +45,10 @@ namespace omaha {
 
 namespace {
 
-const FileHash kUpdateBinHashSha1 = {
-    _T("YF2z/br/S6E3KTca0MT7qziJN44="), _T("")
-};
-const FileHash kUpdateBinBothHashes = {
-    _T("YF2z/br/S6E3KTca0MT7qziJN44="),
-    _T("e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad")
-};
-const FileHash kUpdateBin1HashSha1 = {
-    _T("tbYInfmArVRUD62Ex292vN4LtGQ="), _T("")
-};
-const FileHash kUpdateBin1BothHashes = {
-    _T("tbYInfmArVRUD62Ex292vN4LtGQ="),
-    _T("f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e")
-};
-const FileHash kUpdateBin1HashSha256 = {
-    _T(""),
-    _T("f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e")
-};
+const CString kUpdateBinHashSha256 =
+    _T("e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad");
+const CString kUpdateBin1HashSha256 =
+    _T("f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e");
 
 const TCHAR kAppGuid1[] = _T("{0B35E146-D9CB-4145-8A91-43FDCAEBCD1E}");
 const TCHAR kAppGuid2[] = _T("{C7F2B395-A01C-4806-AA07-9163F66AFC48}");
@@ -84,10 +70,6 @@ class DownloadAppWorkItem : public UserWorkItem {
   DISALLOW_COPY_AND_ASSIGN(DownloadAppWorkItem);
 };
 
-bool FileHashesEqual(const FileHash& hash1, const FileHash& hash2) {
-  return hash1.sha256 == hash2.sha256 && hash1.sha1 == hash2.sha1;
-}
-
 }  // namespace
 
 class DownloadManagerTest : public AppTestBase {
@@ -107,6 +89,16 @@ class DownloadManagerTest : public AppTestBase {
 
     CleanupFiles();
 
+    RegKey::GetValue(MACHINE_REG_UPDATE_DEV,
+                     kRegValueDisablePayloadAuthenticodeVerification,
+                     &disable_payload_authenticode_verification_);
+    if (disable_payload_authenticode_verification_) {
+      // Ensure the registry is in a clean state w.r.t. payload verification.
+      EXPECT_SUCCEEDED(RegKey::DeleteValue(
+          MACHINE_REG_UPDATE_DEV,
+          kRegValueDisablePayloadAuthenticodeVerification));
+    }
+
     download_manager_.reset(new DownloadManager(is_machine_));
     EXPECT_SUCCEEDED(download_manager_->Initialize());
   }
@@ -115,10 +107,54 @@ class DownloadManagerTest : public AppTestBase {
     download_manager_.reset();
     CleanupFiles();
 
+    if (disable_payload_authenticode_verification_) {
+      EXPECT_SUCCEEDED(RegKey::SetValue(
+          MACHINE_REG_UPDATE_DEV,
+          kRegValueDisablePayloadAuthenticodeVerification,
+          disable_payload_authenticode_verification_));
+    } else {
+      EXPECT_SUCCEEDED(RegKey::DeleteValue(
+          MACHINE_REG_UPDATE_DEV,
+          kRegValueDisablePayloadAuthenticodeVerification));
+    }
+
     AppTestBase::TearDown();
   }
 
   virtual void CleanupFiles() = 0;
+
+  void TestCachePackage(App* app,
+                        const TCHAR* unittest_support_file_name,
+                        HRESULT expected_result) {
+    CString file_path(app_util::GetCurrentModuleDirectory());
+    ASSERT_TRUE(::PathAppend(CStrBuf(file_path, MAX_PATH),
+                             _T("unittest_support")));
+    ASSERT_TRUE(::PathAppend(CStrBuf(file_path, MAX_PATH),
+                             unittest_support_file_name));
+    ASSERT_TRUE(File::Exists(file_path));
+
+    File file;
+    HRESULT hr = file.OpenShareMode(file_path, false, false, FILE_SHARE_READ);
+    ASSERT_SUCCEEDED(hr);
+
+    uint32 file_size(0);
+    ASSERT_SUCCEEDED(file.GetLength(&file_size));
+
+    CryptoHash crypto;
+    std::vector<byte> hash_out;
+    ASSERT_HRESULT_SUCCEEDED(crypto.Compute(file_path, 0, &hash_out));
+    std::string hash;
+    b2a_hex(&hash_out[0], &hash, hash_out.size());
+
+    AppVersion* version = app->next_version();
+    ASSERT_SUCCEEDED(version->AddPackage(unittest_support_file_name,
+                                         file_size,
+                                         CString(hash.c_str())));
+
+    Package* package = version->GetPackage(version->GetNumberOfPackages() - 1);
+    hr = download_manager_->CachePackage(package, &file, &file_path);
+    EXPECT_EQ(expected_result, hr) << unittest_support_file_name;
+  }
 
   static void SetAppStateCheckingForUpdate(App* app) {
     SetAppStateForUnitTest(app, new fsm::AppStateCheckingForUpdate);
@@ -130,6 +166,7 @@ class DownloadManagerTest : public AppTestBase {
 
   const CString cache_path_;
   std::unique_ptr<DownloadManager> download_manager_;
+  DWORD disable_payload_authenticode_verification_ = 0; // Saved from registry
 };
 
 
@@ -174,13 +211,13 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultiplePackagesInOneApp) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
             "<package "
-              "hash=\"tbYInfmArVRUD62Ex292vN4LtGQ=\" "
+              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "  // NOLINT
               "name=\"UpdateData1.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -200,7 +237,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultiplePackagesInOneApp) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinBothHashes, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
   EXPECT_LT(0, app->GetDownloadTimeMs());
@@ -210,12 +247,12 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultiplePackagesInOneApp) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData1.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1HashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBin1HashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
   EXPECT_LT(0, app->GetDownloadTimeMs());
 
-  // Sanity check the pings, including the two download metrics pings.
+  // Check the pings, including the two download metrics pings.
   CString actual_pings;
   const PingEventVector& pings(app->ping_events());
   for (size_t i = 0; i != pings.size(); ++i) {
@@ -269,7 +306,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleApps) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
@@ -286,7 +323,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleApps) {
         "<manifest version=\"2.0\">"
           "<packages>"
             "<package "
-              "hash=\"tbYInfmArVRUD62Ex292vN4LtGQ=\" "
+              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "  // NOLINT
               "name=\"UpdateData1.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -308,7 +345,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleApps) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinBothHashes, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
   EXPECT_LT(0, app->GetDownloadTimeMs());
@@ -323,7 +360,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleApps) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData1.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1HashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBin1HashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
   EXPECT_LT(0, app->GetDownloadTimeMs());
@@ -358,7 +395,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Concurrent) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -374,7 +411,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Concurrent) {
         "<manifest version=\"2.0\">"
           "<packages>"
             "<package "
-              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "
+              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "  // NOLINT
               "hash=\"tbYInfmArVRUD62Ex292vN4LtGQ=\" "
               "name=\"UpdateData1.bin\" "
               "required=\"true\" "
@@ -400,12 +437,10 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Concurrent) {
     app = app_bundle_->GetApp(i);
     SetAppStateWaitingToDownload(app);
 
-    std::unique_ptr<DownloadAppWorkItem> work_item(
-        new DownloadAppWorkItem(download_manager_.get(), app));
-
     // WT_EXECUTELONGFUNCTION causes the thread pool to use multiple threads.
     ASSERT_HRESULT_SUCCEEDED(thread_pool.QueueUserWorkItem(
-                                 work_item.release(),
+                                 std::make_unique<DownloadAppWorkItem>(
+                                    download_manager_.get(), app),
                                  COINIT_MULTITHREADED,
                                  WT_EXECUTELONGFUNCTION));
   }
@@ -441,7 +476,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Concurrent) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
 
@@ -450,7 +485,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Concurrent) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData1.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1BothHashes, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBin1HashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
 
@@ -463,6 +498,8 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Concurrent) {
     }
     return;
   }
+
+  thread_pool.Stop();
 }
 
 // Downloads multiple apps concurrently and cancels the downloads while they
@@ -534,12 +571,9 @@ TEST_F(DownloadManagerUserTest, DISABLED_DownloadApp_Cancel) {
   for (int i = 0; i != kNumApps; ++i) {
     app = app_bundle_->GetApp(i);
     SetAppStateWaitingToDownload(app);
-
-    std::unique_ptr<DownloadAppWorkItem> work_item(
-        new DownloadAppWorkItem(download_manager_.get(), app));
-
     ASSERT_HRESULT_SUCCEEDED(thread_pool.QueueUserWorkItem(
-                                 work_item.release(),
+                                 std::make_unique<DownloadAppWorkItem>(
+                                      download_manager_.get(), app),
                                  COINIT_MULTITHREADED,
                                  WT_EXECUTELONGFUNCTION));
   }
@@ -626,6 +660,8 @@ TEST_F(DownloadManagerUserTest, DISABLED_DownloadApp_Cancel) {
     EXPECT_HRESULT_SUCCEEDED(current_state->get_errorCode(&extra_code1));
     EXPECT_EQ(0, extra_code1);
   }
+
+  thread_pool.Stop();
 }
 
 // Common packages of different apps are not cached by the package cache and
@@ -655,7 +691,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleAppsCommonPackage) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -671,7 +707,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleAppsCommonPackage) {
         "<manifest version=\"2.0\">"
           "<packages>"
           "<package "
-            "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+            "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
             "name=\"UpdateData.bin\" "
             "required=\"true\" "
             "size=\"2048\"/>"
@@ -693,7 +729,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleAppsCommonPackage) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
 
@@ -707,7 +743,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_MultipleAppsCommonPackage) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
 }
@@ -732,7 +768,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_FileAlreadyInCache) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -752,7 +788,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_FileAlreadyInCache) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
   EXPECT_LT(0, app->GetDownloadTimeMs());
@@ -779,7 +815,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_FileAlreadyInCache) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
 
   // No bytes are downloaded if the package has been cached already.
   EXPECT_EQ(0, package->bytes_downloaded());
@@ -805,7 +841,7 @@ TEST_F(DownloadManagerUserTest, DISABLED_DownloadApp_404) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"NoSuchFile-OmahaTest.exe\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -825,18 +861,17 @@ TEST_F(DownloadManagerUserTest, DISABLED_DownloadApp_404) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("NoSuchFile-OmahaTest.exe"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(0, package->bytes_downloaded());
   EXPECT_FALSE(download_manager_->IsPackageAvailable(package));
 }
 
-TEST_F(DownloadManagerUserTest, DownloadApp_Sha1HashFailure) {
+TEST_F(DownloadManagerUserTest, DownloadApp_FailWhenOnlySha1Hash) {
   App* app = NULL;
   ASSERT_SUCCEEDED(app_bundle_->createApp(CComBSTR(kAppGuid1), &app));
   EXPECT_SUCCEEDED(app->put_displayName(CComBSTR(_T("Hash Fail"))));
   EXPECT_SUCCEEDED(app->put_isEulaAccepted(VARIANT_TRUE));  // Allow download.
 
-  // Provides the wrong hash for the package.
   CStringA buffer_string =
 
   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
@@ -849,7 +884,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Sha1HashFailure) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"tbYInfmArVRUD62Ex292vN4LtGQ=\" "
+              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -859,22 +894,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Sha1HashFailure) {
     "</app>"
   "</response>";
 
-  EXPECT_HRESULT_SUCCEEDED(LoadBundleFromXml(app_bundle_.get(), buffer_string));
-  SetAppStateWaitingToDownload(app);
-
-  EXPECT_EQ(SIGS_E_INVALID_SIGNATURE, download_manager_->DownloadApp(app));
-
-  const Package* package = app->next_version()->GetPackage(0);
-  ASSERT_TRUE(package);
-  EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
-  EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1HashSha1, package->expected_hash()));
-  EXPECT_EQ(2048, package->bytes_downloaded());
-  EXPECT_FALSE(download_manager_->IsPackageAvailable(package));
-
-  // All bytes were downloaded even if the validation of the file has failed.
-  EXPECT_EQ(2048, package->bytes_downloaded());
-  EXPECT_LT(0, app->GetDownloadTimeMs());
+  EXPECT_FAILED(LoadBundleFromXml(app_bundle_.get(), buffer_string));
 }
 
 TEST_F(DownloadManagerUserTest, DownloadApp_Sha256HashFailure) {
@@ -896,7 +916,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Sha256HashFailure) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "
+              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -915,7 +935,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_Sha256HashFailure) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1HashSha256, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBin1HashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_FALSE(download_manager_->IsPackageAvailable(package));
 
@@ -943,7 +963,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_HashFailure_ActualSmaller) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"tbYInfmArVRUD62Ex292vN4LtGQ=\" "
+              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048000\"/>"
@@ -963,7 +983,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_HashFailure_ActualSmaller) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048000, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1HashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBin1HashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_FALSE(download_manager_->IsPackageAvailable(package));
 
@@ -990,7 +1010,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_HashFailure_ActualLarger) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"tbYInfmArVRUD62Ex292vN4LtGQ=\" "
+              "hash_sha256=\"f955bdcb6611c4e3033cf5104e01c732001da4a79e23f7771fc6f0216195bd6e\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"20\"/>"
@@ -1010,7 +1030,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_HashFailure_ActualLarger) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(20, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBin1HashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBin1HashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_FALSE(download_manager_->IsPackageAvailable(package));
 
@@ -1039,7 +1059,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_BaseUrlFallback) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -1057,7 +1077,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_BaseUrlFallback) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
 }
@@ -1083,7 +1103,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_FallbackToNextUrlIfCachingFails) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -1101,7 +1121,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_FallbackToNextUrlIfCachingFails) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(2048, package->bytes_downloaded());
   EXPECT_TRUE(download_manager_->IsPackageAvailable(package));
 }
@@ -1125,7 +1145,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_EulaNotAccepted) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -1147,7 +1167,7 @@ TEST_F(DownloadManagerUserTest, DownloadApp_EulaNotAccepted) {
   ASSERT_TRUE(package);
   EXPECT_STREQ(_T("UpdateData.bin"), package->filename());
   EXPECT_EQ(2048, package->expected_size());
-  EXPECT_TRUE(FileHashesEqual(kUpdateBinHashSha1, package->expected_hash()));
+  EXPECT_STREQ(kUpdateBinHashSha256, package->expected_hash());
   EXPECT_EQ(0, package->bytes_downloaded());
   EXPECT_FALSE(download_manager_->IsPackageAvailable(package));
   EXPECT_EQ(0, app->GetDownloadTimeMs());
@@ -1172,7 +1192,7 @@ TEST_F(DownloadManagerUserTest, GetPackage) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -1204,13 +1224,36 @@ TEST_F(DownloadManagerUserTest, GetPackage) {
   CString filename(ConcatenatePath(dir, package->filename()));
   std::vector<CString> files;
   files.push_back(filename);
-  EXPECT_SUCCEEDED(VerifyFileHash(files, kUpdateBinHashSha1.sha1));
+  EXPECT_SUCCEEDED(VerifyFileHashSha256(files, kUpdateBinHashSha256));
 
   // Getting the package the second time overwrites the destination file
   // and succeeds.
   EXPECT_SUCCEEDED(download_manager_->GetPackage(package, dir));
 
   EXPECT_SUCCEEDED(DeleteDirectory(dir));
+}
+
+TEST_F(DownloadManagerUserTest, CachePackage) {
+  App* app = NULL;
+  ASSERT_SUCCEEDED(app_bundle_->createApp(CComBSTR(kAppGuid1), &app));
+
+  TestCachePackage(app, _T("SaveArguments.exe"), S_OK);
+  TestCachePackage(app, _T("sha2_0c15be4a15bb0903c901b1d6c265302f.msi"), S_OK);
+  // Make sure that unexpected file extensions are handled gracefully:
+  TestCachePackage(app, _T("declaration.txt"), S_OK);
+
+#ifdef VERIFY_PAYLOAD_AUTHENTICODE_SIGNATURE
+  const TCHAR* kFileWithOldCertificate = _T("old_google_certificate.dll");
+  TestCachePackage(app,
+                   kFileWithOldCertificate,
+                   GOOPDATEDOWNLOAD_E_AUTHENTICODE_VERIFICATION_FAILED);
+  // Test that disabling verification makes the previously failing file succeed:
+  EXPECT_SUCCEEDED(RegKey::SetValue(
+      MACHINE_REG_UPDATE_DEV,
+      kRegValueDisablePayloadAuthenticodeVerification,
+      1UL));
+  TestCachePackage(app, kFileWithOldCertificate, S_OK);
+#endif // VERIFY_PAYLOAD_AUTHENTICODE_SIGNATURE
 }
 
 TEST_F(DownloadManagerUserTest, GetPackage_NotPresent) {
@@ -1231,7 +1274,7 @@ TEST_F(DownloadManagerUserTest, GetPackage_NotPresent) {
         "<manifest version=\"1.0\">"
           "<packages>"
             "<package "
-              "hash=\"YF2z/br/S6E3KTca0MT7qziJN44=\" "
+              "hash_sha256=\"e5a00aa9991ac8a5ee3109844d84a55583bd20572ad3ffcd42792f3c36b183ad\" "  // NOLINT
               "name=\"UpdateData.bin\" "
               "required=\"true\" "
               "size=\"2048\"/>"
@@ -1273,7 +1316,7 @@ TEST(DownloadManagerTest, GetMessageForError) {
 
   EXPECT_STREQ(
       _T("Unable to connect to the Internet. If you use a firewall, please ")
-      _T("whitelist GoogleUpdate.exe."),
+      _T("allowlist ") MAIN_EXE_BASE_NAME _T(".exe."),
       DownloadManager::GetMessageForError(
           ErrorContext(GOOPDATE_E_NO_NETWORK), kEnglish));
 

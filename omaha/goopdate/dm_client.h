@@ -16,6 +16,7 @@
 #define OMAHA_GOOPDATE_DM_CLIENT_H__
 
 #include <windows.h>
+#include <atlpath.h>
 #include <atlstr.h>
 #include <utility>
 #include <vector>
@@ -31,6 +32,9 @@ namespace dm_client {
 // The policy type that supports getting the policies for all Machine
 // applications from the DMServer.
 const char kGoogleUpdateMachineLevelApps[] = "google/machine-level-apps";
+
+// The content-type for all protocol buffer requests.
+const TCHAR kProtobufContentType[] = _T("application/protobuf");
 
 enum RegistrationState {
   // This client appears to not be managed. In particular, neither a device
@@ -51,33 +55,44 @@ RegistrationState GetRegistrationState(DmStorage* dm_storage);
 // Returns S_OK if registration takes place and succeeds, S_FALSE if
 // registration was not needed (either it has already been done, or no
 // enrollment token is found), or a failure HRESULT in case of error.
-HRESULT RegisterIfNeeded(DmStorage* dm_storage);
+// If |is_foreground| is false, RegisterIfNeeded applies a wait before running
+// the registration, since the DM server is rate-limited. The wait is a random
+// value in the range [0, 60000] milisecond.
+// (up to one minute).
+HRESULT RegisterIfNeeded(DmStorage* dm_storage, bool is_foreground);
 
 // Retrieve and persist locally the policies from the Device Management Server.
 HRESULT RefreshPolicies();
 
 namespace internal {
 
-HRESULT RegisterWithRequest(HttpRequestInterface* http_request,
+HRESULT RegisterWithRequest(DmStorage* dm_storage,
+                            std::unique_ptr<HttpRequestInterface> http_request,
                             const CString& enrollment_token,
-                            const CString& device_id,
-                            CStringA* dm_token);
+                            const CString& device_id);
+
+// Sends policy validation result back to DM Server.
+HRESULT SendPolicyValidationResultReportIfNeeded(
+    std::unique_ptr<HttpRequestInterface> http_request, const CString& dm_token,
+    const CString& device_id, const PolicyValidationResult& validation_result);
 
 // Fetch policies from the DMServer. The policies are returned in |responses|
 // containing elements in the following format:
 //   {policy_type}=>{SerializeToString-PolicyFetchResponse}.
-HRESULT FetchPolicies(HttpRequestInterface* http_request,
-                      const CString& dm_token,
-                      const CString& device_id,
-                      PolicyResponsesMap* responses);
+HRESULT FetchPolicies(DmStorage* dm_storage,
+                      std::unique_ptr<HttpRequestInterface> http_request,
+                      const CString& dm_token, const CString& device_id,
+                      const CachedPolicyInfo& info, PolicyResponses* responses);
 
 HRESULT SendDeviceManagementRequest(
-    HttpRequestInterface* http_request,
-    const CStringA& payload,
-    const CString& authorization_header,
-    const CString& device_id,
+    std::unique_ptr<HttpRequestInterface> http_request, const CStringA& payload,
+    const CString& authorization_header, const CString& device_id,
     std::vector<std::pair<CString, CString>> query_params,
     std::vector<uint8>* response);
+
+void HandleDMResponseError(DmStorage* dm_storage, HRESULT hr,
+                           const std::vector<uint8>& response);
+
 CString GetAgent();
 CString GetPlatform();
 CStringA GetOsVersion();

@@ -62,6 +62,10 @@ const IID kIIDsToRegister[] = {
   __uuidof(ICoCreateAsync),
   __uuidof(ICoCreateAsyncStatus),
   __uuidof(ICredentialDialog),
+  __uuidof(IPolicyStatus),
+  __uuidof(IPolicyStatus2),
+  __uuidof(IPolicyStatus3),
+  __uuidof(IPolicyStatusValue),
 
   __uuidof(IProcessLauncher2),
 
@@ -94,7 +98,7 @@ struct ComProxyMode {
     }
   }
 
-  static const TCHAR* const hk_root() {
+  static const TCHAR* hk_root() {
     return is_machine() ? _T("HKLM") : _T("HKCU");
   }
 };
@@ -195,6 +199,7 @@ class ATL_NO_VTABLE ComProxy
   CComPtr<IUnknown> proxy_manager_;
   CComPtr<IInternalUnknown> proxy_internal_unknown_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(ComProxy);
 };
 
@@ -203,7 +208,7 @@ class StdMarshalInfo : public IStdMarshalInfo {
   explicit StdMarshalInfo(bool is_machine) : is_machine_(is_machine) {
     CORE_LOG(L6, (_T("[StdMarshalInfo::StdMarshalInfo][%d]"), is_machine));
 
-    VERIFY1(SUCCEEDED(ComProxy::RegisterProxyStubs()));
+    VERIFY_SUCCEEDED(ComProxy::RegisterProxyStubs());
   }
 
   // IStdMarshalInfo.
@@ -225,4 +230,3 @@ class StdMarshalInfo : public IStdMarshalInfo {
 }  // namespace omaha
 
 #endif  // OMAHA_GOOPDATE_COM_PROXY_H_
-

@@ -132,6 +132,7 @@ const TCHAR* const kStateCancelled = _T("state_cancelled");
 const TCHAR* const kStatus = _T("status");
 const TCHAR* const kSuccessAction = _T("onsuccess");
 const TCHAR* const kSuccessUrl = _T("successurl");
+const TCHAR* const kTargetChannel = _T("release_channel");
 const TCHAR* const kTargetVersionPrefix = _T("targetversionprefix");
 const TCHAR* const kTestSource = _T("testsource");
 const TCHAR* const kTerminateAllBrowsers = _T("terminateallbrowsers");
@@ -155,9 +156,6 @@ const TCHAR* const kAppDefinedPrefix = _T("_");
 
 namespace value {
 
-const TCHAR* const kArchAmd64 = _T("x64");
-const TCHAR* const kArchIntel = _T("x86");
-const TCHAR* const kArchUnknown = _T("unknown");
 const TCHAR* const kBits = _T("bits");
 const TCHAR* const kCacheable = _T("cacheable");
 const TCHAR* const kClientRegulated = _T("cr");

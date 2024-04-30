@@ -27,7 +27,6 @@ local_env.FilterOut(LINKFLAGS = ['/NODEFAULTLIB'])
 
 local_env.Append(
     CPPPATH = [
-        '$OBJ_ROOT',                    # Needed for the generated files
         '$MAIN_DIR/goopdate/resources',
         '$THIRD_PARTY/gtest/include',
         ],
@@ -43,7 +42,6 @@ local_env.Append(
         '$LIB_DIR/google_update_recovery.lib',
         '$LIB_DIR/logging.lib',
         '$LIB_DIR/net.lib',
-        '$LIB_DIR/repair_goopdate.lib',
         '$LIB_DIR/security.lib',
         '$LIB_DIR/service.lib',
         '$LIB_DIR/statsreport.lib',
@@ -55,7 +53,6 @@ local_env.Append(
         'comctl32.lib',
         'crypt32.lib',
         'iphlpapi.lib',
-        'msi.lib',
         'mstask.lib',
         'netapi32.lib',
         'psapi.lib',

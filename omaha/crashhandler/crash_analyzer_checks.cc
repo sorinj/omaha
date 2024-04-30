@@ -20,6 +20,7 @@
 #include <ctime>
 
 #include "omaha/base/safe_format.h"
+#include "omaha/base/utils.h"
 
 namespace omaha {
 
@@ -92,8 +93,8 @@ CrashAnalysisResult NtFunctionsOnStack::Run() {
   // Because the crash handler process is running on the same system
   // as the process which crashed we can assume that they are mapped
   // in the same location in both processes.
-  HMODULE ntdll = ::LoadLibraryA("ntdll.dll");
-  HMODULE kernel32 = ::LoadLibraryA("kernel32.dll");
+  HMODULE ntdll = LoadSystemLibrary(_T("ntdll.dll"));
+  HMODULE kernel32 = LoadSystemLibrary(_T("kernel32.dll"));
   std::vector<BYTE*> functions;
   functions.push_back(reinterpret_cast<BYTE*>(
       ::GetProcAddress(kernel32, "HeapCreate")));

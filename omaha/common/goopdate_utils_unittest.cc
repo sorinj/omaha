@@ -20,11 +20,12 @@
 #include <atlpath.h>
 #include <atlsecurity.h>
 #include <atlstr.h>
+
 #include <map>
 #include <vector>
+#include <regex>  // NOLINT
 
 #include "omaha/base/app_util.h"
-#include "omaha/base/atl_regexp.h"
 #include "omaha/base/browser_utils.h"
 #include "omaha/base/constants.h"
 #include "omaha/base/const_utils.h"
@@ -56,10 +57,10 @@ namespace omaha {
 
 namespace {
 
-#define DUMMY_CLSID  _T("{6FC94136-0D4C-450e-99C2-BCDA72A9C8F0}")
-const TCHAR* hkcr_key_name = _T("HKCR\\CLSID\\") DUMMY_CLSID;
-const TCHAR* hklm_key_name = _T("HKLM\\Software\\Classes\\CLSID\\") DUMMY_CLSID;
-const TCHAR* hkcu_key_name = _T("HKCU\\Software\\Classes\\CLSID\\") DUMMY_CLSID;
+#define TEST_CLSID  _T("{6FC94136-0D4C-450e-99C2-BCDA72A9C8F0}")
+const TCHAR* hkcr_key_name = _T("HKCR\\CLSID\\") TEST_CLSID;
+const TCHAR* hklm_key_name = _T("HKLM\\Software\\Classes\\CLSID\\") TEST_CLSID;
+const TCHAR* hkcu_key_name = _T("HKCU\\Software\\Classes\\CLSID\\") TEST_CLSID;
 
 const TCHAR* kAppId = _T("{3DAE8C13-C394-481E-8163-4E7A7699084F}");
 
@@ -896,17 +897,18 @@ TEST(GoopdateUtilsTest, GetOSInfo) {
   CString os_version = SystemInfo::GetKernel32OSVersion();
   EXPECT_TRUE(!os_version.IsEmpty());
 
-  const AtlRE major_minor_build = _T("{\\d+\\.\\d+\\.\\d+}");
+  const std::wregex major_minor_build { _T("\\d+\\.\\d+\\.\\d+") };
 
-  CString expected_os_version;
-  CString actual_os_version;
-  EXPECT_TRUE(AtlRE::PartialMatch(os_version,
-                                  major_minor_build,
-                                  &expected_os_version));
-  EXPECT_TRUE(AtlRE::PartialMatch(os_version_getosinfo,
-                                  major_minor_build,
-                                  &actual_os_version));
-  EXPECT_STREQ(expected_os_version, actual_os_version);
+  std::wcmatch expected_os_version;
+  EXPECT_TRUE(std::regex_search(os_version.GetString(),
+                                expected_os_version,
+                                major_minor_build));
+  std::wcmatch actual_os_version;
+  EXPECT_TRUE(std::regex_search(os_version.GetString(),
+                                actual_os_version,
+                                major_minor_build));
+  EXPECT_STREQ(expected_os_version.str(0).c_str(),
+               actual_os_version.str(0).c_str());
 }
 
 class GoopdateUtilsRegistryProtectedTest : public testing::Test {
@@ -1106,8 +1108,8 @@ TEST_F(GoopdateUtilsRegistryProtectedWithMachineFolderPathsTest,
   CString path = BuildGoogleUpdateExePath(true);
   CString program_files_path;
   EXPECT_SUCCEEDED(GetFolderPath(CSIDL_PROGRAM_FILES, &program_files_path));
-  EXPECT_STREQ(program_files_path + _T("\\") + SHORT_COMPANY_NAME +
-               _T("\\") + PRODUCT_NAME + _T("\\GoogleUpdate.exe"),
+  EXPECT_STREQ(program_files_path + _T("\\") + PATH_COMPANY_NAME +
+               _T("\\") + PRODUCT_NAME + _T("\\") + MAIN_EXE_BASE_NAME + _T(".exe"),
                path);
 }
 
@@ -1117,15 +1119,15 @@ TEST_F(GoopdateUtilsRegistryProtectedWithMachineFolderPathsTest,
   CString path = BuildGoogleUpdateExePath(true);
   CString program_files_path;
   EXPECT_SUCCEEDED(GetFolderPath(CSIDL_PROGRAM_FILES, &program_files_path));
-  EXPECT_STREQ(program_files_path + _T("\\") + SHORT_COMPANY_NAME +
-               _T("\\") + PRODUCT_NAME + _T("\\GoogleUpdate.exe"),
+  EXPECT_STREQ(program_files_path + _T("\\") + PATH_COMPANY_NAME +
+               _T("\\") + PRODUCT_NAME + _T("\\") + MAIN_EXE_BASE_NAME + _T(".exe"),
                path);
 
   // Test when the key exists but the value doesn't.
   ASSERT_SUCCEEDED(RegKey::CreateKey(MACHINE_REG_CLIENTS_GOOPDATE));
   path = BuildGoogleUpdateExePath(true);
-  EXPECT_STREQ(program_files_path + _T("\\") + SHORT_COMPANY_NAME +
-               _T("\\") + PRODUCT_NAME + _T("\\GoogleUpdate.exe"),
+  EXPECT_STREQ(program_files_path + _T("\\") + PATH_COMPANY_NAME +
+               _T("\\") + PRODUCT_NAME + _T("\\") + MAIN_EXE_BASE_NAME + _T(".exe"),
                path);
 }
 
@@ -1141,8 +1143,8 @@ TEST_F(GoopdateUtilsRegistryProtectedWithUserFolderPathsTest,
   CString user_appdata;
   EXPECT_SUCCEEDED(GetFolderPath(CSIDL_LOCAL_APPDATA, &user_appdata));
   CString expected_path;
-  expected_path.Format(_T("%s\\") SHORT_COMPANY_NAME _T("\\")
-                       PRODUCT_NAME _T("\\GoogleUpdate.exe"),
+  expected_path.Format(_T("%s\\") PATH_COMPANY_NAME _T("\\")
+                       PRODUCT_NAME _T("\\") MAIN_EXE_BASE_NAME _T(".exe"),
                        user_appdata);
   EXPECT_STREQ(expected_path, path);
 }
@@ -1152,8 +1154,8 @@ TEST_F(GoopdateUtilsRegistryProtectedWithUserFolderPathsTest,
   CString user_appdata;
   EXPECT_SUCCEEDED(GetFolderPath(CSIDL_LOCAL_APPDATA, &user_appdata));
   CString expected_path;
-  expected_path.Format(_T("%s\\") SHORT_COMPANY_NAME _T("\\")
-                       PRODUCT_NAME _T("\\GoogleUpdate.exe"),
+  expected_path.Format(_T("%s\\") PATH_COMPANY_NAME _T("\\")
+                       PRODUCT_NAME _T("\\") MAIN_EXE_BASE_NAME _T(".exe"),
                        user_appdata);
 
   // Test when the key doesn't exist.
@@ -1175,7 +1177,10 @@ TEST_F(GoopdateUtilsRegistryProtectedWithMachineFolderPathsTest,
                                     _T("pv"),
                                     _T("1.2.3.4")));
   const TCHAR* kArgs = _T("/cr");
-  HRESULT hr = StartGoogleUpdateWithArgs(true, kArgs, NULL);
+  HRESULT hr =
+      StartGoogleUpdateWithArgs(true, StartMode::kForeground, kArgs, NULL);
+  EXPECT_TRUE(S_OK == hr || HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) == hr);
+  hr = StartGoogleUpdateWithArgs(true, StartMode::kBackground, kArgs, NULL);
   EXPECT_TRUE(S_OK == hr || HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) == hr);
 }
 
@@ -1191,7 +1196,10 @@ TEST_F(GoopdateUtilsRegistryProtectedWithUserFolderPathsTest,
                                     _T("pv"),
                                     _T("1.2.3.4")));
   const TCHAR* kArgs = _T("/cr");
-  HRESULT hr = StartGoogleUpdateWithArgs(false, kArgs, NULL);
+  HRESULT hr =
+      StartGoogleUpdateWithArgs(false, StartMode::kForeground, kArgs, NULL);
+  EXPECT_TRUE(S_OK == hr || HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) == hr);
+  hr = StartGoogleUpdateWithArgs(false, StartMode::kBackground, kArgs, NULL);
   EXPECT_TRUE(S_OK == hr || HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) == hr);
 }
 
@@ -1199,7 +1207,7 @@ TEST(GoopdateUtilsTest, BuildInstallDirectory_Machine) {
   const CPath dir = BuildInstallDirectory(true, _T("1.2.3.0"));
   CString program_files_path;
   EXPECT_SUCCEEDED(GetFolderPath(CSIDL_PROGRAM_FILES, &program_files_path));
-  EXPECT_STREQ(program_files_path + _T("\\") + SHORT_COMPANY_NAME +
+  EXPECT_STREQ(program_files_path + _T("\\") + PATH_COMPANY_NAME +
                _T("\\") + PRODUCT_NAME + _T("\\1.2.3.0"), dir);
 }
 
@@ -1466,6 +1474,12 @@ TEST(GoopdateUtilsTest, ReadNameValuePairsFromFileTest_ReadManyPairs) {
 }
 
 TEST(GoopdateUtilsTest, WriteInstallerDataToTempFile) {
+  CString file_path;
+  EXPECT_EQ(S_FALSE, WriteInstallerDataToTempFile(
+                         CPath(_T("NonExistentDirectory")),
+                         CString(_T("hello\n")),
+                         &file_path));
+
   CStringA utf8_bom;
   utf8_bom.Format("%c%c%c", 0xEF, 0xBB, 0xBF);
 
@@ -1491,12 +1505,14 @@ TEST(GoopdateUtilsTest, WriteInstallerDataToTempFile) {
 
   ASSERT_EQ(expected_installer_data.size(), list_installer_data.size());
 
+  const CPath directory(app_util::GetCurrentModuleDirectory());
   for (size_t i = 0; i < list_installer_data.size(); ++i) {
     CString installer_data = list_installer_data[i];
-    SCOPED_TRACE(installer_data);
+    SCOPED_TRACE(installer_data.GetString());
 
-    CString file_path;
-    HRESULT hr = WriteInstallerDataToTempFile(installer_data, &file_path);
+    HRESULT hr = WriteInstallerDataToTempFile(directory,
+                                              installer_data,
+                                              &file_path);
     ON_SCOPE_EXIT(::DeleteFile, file_path.GetString());
     EXPECT_SUCCEEDED(hr);
 
@@ -1829,12 +1845,14 @@ TEST(GoopdateUtilsTest, GetMacHashesViaNDIS) {
 
   for (size_t i = 0; i < mac_hashes.size(); ++i) {
     CStringA mac_hash(WideToUtf8(mac_hashes[i]));
-    std::vector<byte> mac;
-    EXPECT_SUCCEEDED(Base64::Decode(mac_hash, &mac));
+    CStringA mac;
+    ASSERT_GE(Base64Unescape(mac_hash, &mac), 0);
 
     CString mac_string;
-    for (size_t j = 0; j < mac.size(); ++j) {
-      mac_string.AppendFormat(_T("%s%02X"), j == 0 ? _T("") : _T(":"), mac[j]);
+    for (int j = 0; j < mac.GetLength(); ++j) {
+      // The cast to uint8 is necessary to prevent sign extension.
+      const uint8 octet = static_cast<uint8>(mac[j]);
+      mac_string.AppendFormat(_T("%s%02X"), j == 0 ? _T("") : _T(":"), octet);
     }
 
     ExpectMacMatchViaWMI(mac_string);

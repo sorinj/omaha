@@ -19,6 +19,7 @@
 #include <windows.h>
 #include <accctrl.h>
 #include <aclapi.h>
+#include <lm.h>
 #include <ras.h>
 #include <sddl.h>
 #include <shellapi.h>
@@ -33,6 +34,7 @@
 #include "omaha/base/constants.h"
 #include "omaha/base/debug.h"
 #include "omaha/base/error.h"
+#include "omaha/base/file.h"
 #include "omaha/base/logging.h"
 #include "omaha/base/reg_key.h"
 #include "omaha/base/static_assert.h"
@@ -74,6 +76,11 @@ enum __MIDL___MIDL_itf_objidl_0000_0047_0002 {
 ULONGLONG VersionFromString(const CString& s);
 
 CString StringFromVersion(ULONGLONG version);
+
+// Loads a DLL from the system directory, using LOAD_LIBRARY_SEARCH_SYSTEM32, if
+// the flag is supported by the OS. The presence of the feature is detected at
+// runtime. `library_name` constains the name of the DLL, without the path.
+HMODULE LoadSystemLibrary(const TCHAR* library_name);
 
 // Gets current directory
 CString GetCurrentDir();
@@ -151,10 +158,6 @@ HRESULT IsSystemProcess(bool* is_system_process);
 // interactive session: console, terminal services, or fast user switching.
 HRESULT IsUserLoggedOn(bool* is_logged_on);
 
-// Returns true if URLACTION_MANAGED_UNSIGNED is disabled for the Internet zone
-// for the current user.
-bool IsClickOnceDisabled();
-
 // Wrapper around ::GetProcAddress().
 template <typename T>
 bool GPA(HMODULE module, const char* function_name, T* function_pointer) {
@@ -180,13 +183,17 @@ bool GPA(HMODULE module, const char* function_name, T* function_pointer) {
                  result_error)                                              \
 typedef result_type (calling_convention *function##_pointer) proto;         \
 inline result_type function##Wrap proto {                                   \
-  scoped_library dll(::LoadLibrary(_T(#module)));                           \
-  ASSERT1(dll);                                                             \
+  scoped_library dll(LoadSystemLibrary(_T(#module)));                       \
+  ASSERT(dll, (_T("::GetLastError[%d]"), ::GetLastError()));                \
   if (!dll) {                                                               \
     return result_error;                                                    \
   }                                                                         \
   function##_pointer fn = NULL;                                             \
-  return GPA(get(dll), #function, &fn) ? (*fn) call : result_error;         \
+  if (GPA(get(dll), #function, &fn)) {                                      \
+    return (*fn) call;                                                      \
+  } else {                                                                  \
+    return result_error;                                                    \
+  }                                                                         \
 }
 
 GPA_WRAP(RasApi32.dll,
@@ -196,14 +203,6 @@ GPA_WRAP(RasApi32.dll,
          APIENTRY,
          DWORD,
          ERROR_MOD_NOT_FOUND);
-
-GPA_WRAP(kernel32.dll,
-         AttachConsole,
-         (DWORD process_id),
-         (process_id),
-         WINAPI,
-         BOOL,
-         0);
 
 // Private Object Namespaces for Vista and above. More information here:
 // http://msdn2.microsoft.com/en-us/library/ms684295(VS.85).aspx
@@ -251,10 +250,46 @@ bool IsPrivateNamespaceAvailable();
 //   S_OK:    Created directory
 //   S_FALSE: Directory already existed
 //   E_FAIL:  Couldn't create
-HRESULT CreateDir(const TCHAR* dirname, LPSECURITY_ATTRIBUTES security_attr);
+inline HRESULT CreateDir(const TCHAR* in_dir,
+                         LPSECURITY_ATTRIBUTES security_attr) {
+  _ASSERTE(in_dir);
+  CString path;
+  if (!PathCanonicalize(CStrBuf(path, MAX_PATH), in_dir)) {
+    return E_FAIL;
+  }
+  // Standardize path on backslash so Find works.
+  path.Replace(_T('/'), _T('\\'));
+  int next_slash = path.Find(_T('\\'));
+  while (true) {
+    int len = 0;
+    if (next_slash == -1) {
+      len = path.GetLength();
+    } else {
+      len = next_slash;
+    }
+    CString dir(path.Left(len));
+    // The check for File::Exists should not be needed. However in certain
+    // cases, i.e. when the program is run from a n/w drive or from the
+    // root drive location, the first CreateDirectory fails with an
+    // E_ACCESSDENIED instead of a ALREADY_EXISTS. Hence we protect the call
+    // with the exists.
+    if (!File::Exists(dir)) {
+      if (!::CreateDirectory(dir, security_attr)) {
+        DWORD error = ::GetLastError();
+        if (ERROR_FILE_EXISTS != error && ERROR_ALREADY_EXISTS != error) {
+          return HRESULT_FROM_WIN32(error);
+        }
+      }
+    }
+    if (next_slash == -1) {
+      break;
+    }
+    next_slash = path.Find(_T('\\'), next_slash + 1);
+  }
 
-// Gets the path for the specified special folder.
-HRESULT GetFolderPath(int csidl, CString* path);
+  return S_OK;
+}
+
 
 // Returns true if this directory name is 'safe' for deletion:
 //  - it doesn't contain ".."
@@ -361,16 +396,14 @@ inline void WINAPI NullAPCFunc(ULONG_PTR) {}
 void EnsureRasmanLoaded();
 
 // Returns if the HRESULT argument is a COM error
-// TODO(omaha): use an ANONYMOUS_VARIABLE to avoid the situation in which the
-// macro gets called like RET_IF_FAILED(hr);
 // For now, use a quick fix hr -> __hr. Leading underscore names are not to be
 // used in application code.
-#define RET_IF_FAILED(x)    \
-    do {                    \
-      HRESULT __hr(x);      \
-      if (FAILED(__hr)) {   \
-        return __hr;        \
-      }                     \
+#define RET_IF_FAILED(x)                     \
+    do {                                     \
+      auto ANONYMOUS_VARIABLE(__hr)(x);      \
+      if (FAILED(ANONYMOUS_VARIABLE(__hr))) {\
+        return ANONYMOUS_VARIABLE(__hr);     \
+      }                                      \
     } while (false)
 
 // return error if the first argument evaluates to false
@@ -399,36 +432,35 @@ void EnsureRasmanLoaded();
 
 // return if the HRESULT argument evaluates to FAILED - but also assert
 // if failed
-#define RET_IF_FAILED_ASSERT(x, msg) \
-    do {                             \
-      HRESULT hr(x);                 \
-      if (FAILED(hr)) {              \
-        ASSERT(false, msg);          \
-        return hr;                   \
-      }                              \
+#define RET_IF_FAILED_ASSERT(x, msg)          \
+    do {                                      \
+     auto ANONYMOUS_VARIABLE(__hr)(x);        \
+      if (FAILED(ANONYMOUS_VARIABLE(__hr))) { \
+        ASSERT(false, msg);                   \
+        return ANONYMOUS_VARIABLE(__hr);      \
+      }                                       \
     } while (false)
-
 
 // return if the HRESULT argument evaluates to FAILED - but also log an error
 // message if failed
-#define RET_IF_FAILED_LOG(x, cat, msg) \
-    do {                               \
-      HRESULT hr(x);                   \
-      if (FAILED(hr)) {                \
-        LC_LOG(cat, LEVEL_ERROR, msg); \
-        return hr;                     \
-      }                                \
+#define RET_IF_FAILED_LOG(x, cat, msg)        \
+    do {                                      \
+      auto ANONYMOUS_VARIABLE(__hr)(x);       \
+      if (FAILED(ANONYMOUS_VARIABLE(__hr))) { \
+        LC_LOG(cat, LEVEL_ERROR, msg);        \
+        return ANONYMOUS_VARIABLE(__hr);      \
+      }                                       \
     } while (false)
 
 // return if the HRESULT argument evaluates to FAILED - but also REPORT an error
 // message if failed
-#define RET_IF_FAILED_REPORT(x, msg, n) \
-    do {                                \
-      HRESULT hr(x);                    \
-      if (FAILED(hr)) {                 \
-        REPORT(false, R_ERROR, msg, n); \
-        return hr;                      \
-      }                                 \
+#define RET_IF_FAILED_REPORT(x, msg, n)       \
+    do {                                      \
+      ANONYMOUS_VARIABLE(__hr)(x);            \
+      if (FAILED(ANONYMOUS_VARIABLE(__hr))) { \
+        REPORT(false, R_ERROR, msg, n);       \
+        return ANONYMOUS_VARIABLE(__hr);      \
+      }                                       \
     } while (false)
 
 // Initializes a POD to zero.
@@ -716,18 +748,6 @@ HRESULT ReadEntireFileShareMode(const TCHAR* filepath,
 HRESULT WriteEntireFile(const TCHAR * filepath,
                         const std::vector<byte>& buffer_in);
 
-// Conversions between a byte stream and a std::string
-HRESULT BufferToString(const std::vector<byte>& buffer_in, CStringA* str_out);
-HRESULT BufferToString(const std::vector<byte>& buffer_in, CString* str_out);
-HRESULT StringToBuffer(const CStringA& str_in, std::vector<byte>* buffer_out);
-HRESULT StringToBuffer(const CString& str_in, std::vector<byte>* buffer_out);
-
-// Splits a "full regkey name" into a key name part and a value name part.
-// Handles "(default)" as a value name.  Treats a trailing "/" as "(default)".
-HRESULT RegSplitKeyvalueName(const CString& keyvalue_name,
-                             CString* key_name,
-                             CString* value_name);
-
 // Expands string with embedded special variables which are enclosed
 // in '%' pair. For example, "%PROGRAMFILES%\Google" expands to
 // "C:\Program Files\Google".
@@ -856,7 +876,7 @@ class LocalCallAccessPermissionHelper {
 
     RegKey key;
     RET_IF_FAILED(key.Open(key_app_id.Key(), T::GetAppIdT(), KEY_WRITE));
-    VERIFY1(SUCCEEDED(key.DeleteValue(_T("AccessPermission"))));
+    VERIFY_SUCCEEDED(key.DeleteValue(_T("AccessPermission")));
 
     // Now, call the base ATL module implementation to unregister the AppId
     RET_IF_FAILED(T::UpdateRegistryAppId(FALSE));
@@ -879,6 +899,23 @@ inline bool IsLocalSystemSid(const TCHAR* sid) {
   return _tcsicmp(sid, kLocalSystemSid) == 0;
 }
 
+// Returns true if the argument is a uuid. In Microsoft parlance, a UUID is a
+// GUID without the curly braces, as defined by ::UuidFromString().
+inline bool IsUuid(const CString& s) {
+  if (s.IsEmpty()) {
+    return false;
+  }
+
+  // We can use ::UuidFromString() instead of the following code. However,
+  // ::UuidFromString() requires taking a dependency on Rpcrt4.lib, and also
+  // uses NT types such as RPC_STATUS for the return code and RPC_WSTR for the
+  // input string. So this code reuses IsGuid() instead.
+  CString guid(s);
+  guid.Insert(0, _T('{'));
+  guid.AppendChar(_T('}'));
+  return IsGuid(guid);
+}
+
 // Deletes an object. The functor is useful in for_each algorithms.
 struct DeleteFun {
   template <class T> void operator()(T ptr) { delete ptr; }
@@ -898,8 +935,151 @@ HRESULT GetExePathFromCommandLine(const TCHAR* command_line,
 // Waits for MSI to complete, if MSI is busy installing or uninstalling apps.
 HRESULT WaitForMSIExecute(int timeout_ms);
 
+// Gets the full path name to a temporary file in the specified directory.
+// Returns an empty string in case of errors.
+inline CString GetTempFilenameAt(const TCHAR* dir, const TCHAR* prefix) {
+  _ASSERTE(dir);
+  _ASSERTE(prefix);
+
+  CString temp_file;
+  UINT result = ::GetTempFileName(dir, prefix, 0, CStrBuf(temp_file, MAX_PATH));
+  if (result == 0 || result == ERROR_BUFFER_OVERFLOW) {
+    temp_file.Empty();
+  }
+
+  return temp_file;
+}
+
 // Returns the value of the specified environment variable.
-CString GetEnvironmentVariableAsString(const TCHAR* name);
+inline CString GetEnvironmentVariableAsString(const TCHAR* name) {
+  CString value;
+  DWORD value_length = ::GetEnvironmentVariable(name, NULL, 0);
+  if (value_length) {
+    ::GetEnvironmentVariable(name, CStrBuf(value, value_length), value_length);
+  }
+
+  return value;
+}
+
+// Gets the path for the specified special folder.
+inline HRESULT GetFolderPath(int csidl, CString* path) {
+  if (!path) {
+    return E_INVALIDARG;
+  }
+  path->Empty();
+
+  TCHAR buffer[MAX_PATH] = {0};
+  HRESULT hr = ::SHGetFolderPath(NULL, csidl, NULL, SHGFP_TYPE_CURRENT, buffer);
+  if (FAILED(hr)) {
+    // In locked-down environments or with registry redirection,
+    // ::SHGetFolderPath can fail. We try to fall back on environment variables
+    // for the CSIDL values below.
+    csidl &= CSIDL_FLAG_MASK ^ 0xFFFF;
+    if (csidl == CSIDL_PROGRAM_FILES) {
+      *path = GetEnvironmentVariableAsString(_T("ProgramFiles"));
+    } else if (csidl == CSIDL_LOCAL_APPDATA) {
+      *path = GetEnvironmentVariableAsString(_T("LocalAppData"));
+    }
+
+    if (!path->IsEmpty()) {
+      return S_FALSE;
+    }
+
+    return hr;
+  }
+
+  *path = buffer;
+  return S_OK;
+}
+
+inline int MapCSIDLFor64Bit(int csidl) {
+  // We assume, for now, that Omaha will always be deployed in a 32-bit form.
+  // If any 64-bit components (such as the crash handler) need to query paths,
+  // they need to be directed to the 32-bit equivalents.
+
+  switch (csidl) {
+    case CSIDL_PROGRAM_FILES:
+      return CSIDL_PROGRAM_FILESX86;
+    case CSIDL_PROGRAM_FILES_COMMON:
+      return CSIDL_PROGRAM_FILES_COMMONX86;
+    case CSIDL_SYSTEM:
+      return CSIDL_SYSTEMX86;
+    default:
+      return csidl;
+  }
+}
+
+// GetDir32 is named as such because it will always look for 32-bit versions
+// of directories; i.e. on a 64-bit OS, CSIDL_PROGRAM_FILES will return
+// Program Files (x86).  If we need to genuinely find 64-bit locations on
+// 64-bit code in the future, we need to add a GetDir64() which omits the call
+// to MapCSIDLFor64Bit().
+inline HRESULT GetDir32(int csidl,
+                        const CString& path_tail,
+                        bool create_dir,
+                        CString* dir) {
+  _ASSERTE(dir);
+
+#ifdef _WIN64
+  csidl = MapCSIDLFor64Bit(csidl);
+#endif
+
+  CString path;
+  HRESULT hr = GetFolderPath(csidl | CSIDL_FLAG_DONT_VERIFY, &path);
+  if (FAILED(hr)) {
+    return hr;
+  }
+  if (!::PathAppend(CStrBuf(path, MAX_PATH), path_tail)) {
+    return GOOPDATE_E_PATH_APPEND_FAILED;
+  }
+  dir->SetString(path);
+
+  // Try to create the directory. Continue if the directory can't be created.
+  if (create_dir) {
+    CreateDir(path, NULL);
+  }
+  return S_OK;
+}
+
+// Returns a secure temp path if the caller is admin and the path is writable by
+// the caller. Returns an empty string otherwise.
+inline CString GetSecureSystemTempDir() {
+  if (!::IsUserAnAdmin()) {
+    return {};
+  }
+
+  // Retrieves the path `%windir%\SystemTemp` if available, else retrieves
+  // `%programfiles%\Google\Temp`.
+  const struct {
+    const int csidl;
+    const CString path_tail;
+    const bool create_dir;
+  } keys[] = {
+      {CSIDL_WINDOWS, _T("SystemTemp"), false},
+      {CSIDL_PROGRAM_FILES, OMAHA_REL_TEMP_DIR, true},
+  };
+
+  for (const auto& key : keys) {
+    CString secure_system_temp;
+    const HRESULT hr = GetDir32(key.csidl,
+                                key.path_tail,
+                                key.create_dir,
+                                &secure_system_temp);
+    if (FAILED(hr) || !File::IsDirectory(secure_system_temp)) {
+      continue;
+    }
+
+    const CString temp_file(GetTempFilenameAt(secure_system_temp, _T("GUM")));
+    if (temp_file.IsEmpty()) {
+      continue;
+    }
+    ::DeleteFile(temp_file);
+
+    return secure_system_temp;
+  }
+
+  return {};
+}
 
 // Returns true if the OS is installing (e.g., Audit Mode at an OEM factory).
 // NOTE: This is unreliable on Windows Vista and later. Some computers remain in
@@ -948,10 +1128,6 @@ inline T CeilingDivide(T m, T n) {
 // Returns an empty string in case of errors.
 CString GetTempFilename(const TCHAR* prefix);
 
-// Gets the full path name to a temporary file in the specified directory.
-// Returns an empty string in case of errors.
-CString GetTempFilenameAt(const TCHAR* dir, const TCHAR* prefix);
-
 // This function is roughly equivalent to ::WaitForMultipleObjects() with the
 // bWaitAll parameter set to TRUE; however, it supports more than 64 handles.
 DWORD WaitForAllObjects(size_t count, const HANDLE* handles, DWORD timeout);
@@ -968,12 +1144,52 @@ GPA_WRAP(MDMRegistration.dll,
          HRESULT,
          E_FAIL);
 
+GPA_WRAP(kernel32.dll,
+         GetProductInfo,
+         (DWORD major_version, DWORD minor_version, DWORD sp_major, DWORD sp_minor, PDWORD product_type),  // NOLINT
+         (major_version, minor_version, sp_major, sp_minor, product_type),
+         WINAPI,
+         BOOL,
+         FALSE);
+
+GPA_WRAP(NetApi32.dll,
+         NetGetAadJoinInformation,
+         (LPCWSTR tenant_id, PDSREG_JOIN_INFO* join_info),
+         (tenant_id, join_info),
+         NET_API_FUNCTION,
+         HRESULT,
+         E_FAIL);
+
+GPA_WRAP(NetApi32.dll,
+         NetFreeAadJoinInformation,
+         (PDSREG_JOIN_INFO join_info),
+         (join_info),
+         NET_API_FUNCTION,
+         VOID,
+         /* No return value for void function */);
+
+enum DomainEnrollmentState {
+  UNKNOWN = -1,
+  NOT_ENROLLED,
+  UNKNOWN_ENROLLED,
+  ENROLLED,
+};
+
+// Returns ENROLLED if ::NetGetJoinInformation() returns ::NetSetupDomainName.
+// Returns UNKNOWN_ENROLLED if ::NetGetJoinInformation() returns
+// ::NetSetupUnknownStatus. Returns NOT_ENROLLED in other cases.
+DomainEnrollmentState EnrolledToDomainStatus();
+
 // Returns true if the machine is being managed by an MDM system.
 bool IsDeviceRegisteredWithManagement();
 
+// Returns true if the device is joined to Azure AD or the current user added
+// Azure AD work accounts.
+bool IsJoinedToAzureAD();
+
 // Returns true if the current machine is considered enterprise managed in some
 // fashion.  A machine is considered managed if it is either domain enrolled
-// or registered with an MDM.
+// or an enterprise Windows SKU registered with an MDM.
 bool IsEnterpriseManaged();
 
 }  // namespace omaha

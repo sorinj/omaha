@@ -31,6 +31,15 @@ class UpdateRequestTest : public ::testing::TestWithParam<bool> {
   bool IsDomain() {
     return GetParam();
   }
+
+  void SetUp() override {
+    ClearGroupPolicies();
+  }
+
+  void TearDown() override {
+    ClearGroupPolicies();
+  }
+
 };
 
 INSTANTIATE_TEST_CASE_P(IsDomain, UpdateRequestTest, ::testing::Bool());
@@ -84,23 +93,19 @@ TEST_P(UpdateRequestTest, DlPref) {
       UpdateRequest::Create(false, _T("unittest"), _T("unittest"), CString()));
   EXPECT_STREQ(_T(""), update_request->request().dlpref);
 
-  EXPECT_HRESULT_SUCCEEDED(RegKey::SetValue(kRegKeyGoopdateGroupPolicy,
-                                            kRegValueDownloadPreference,
-                                            _T("unknown")));
+  EXPECT_SUCCEEDED(SetPolicyString(kRegValueDownloadPreference, _T("unknown")));
   update_request.reset(
       UpdateRequest::Create(false, _T("unittest"), _T("unittest"), CString()));
   EXPECT_STREQ(_T(""), update_request->request().dlpref);
 
-  EXPECT_HRESULT_SUCCEEDED(RegKey::SetValue(kRegKeyGoopdateGroupPolicy,
-                                            kRegValueDownloadPreference,
-                                            kDownloadPreferenceCacheable));
+  EXPECT_SUCCEEDED(SetPolicyString(kRegValueDownloadPreference,
+                                   kDownloadPreferenceCacheable));
   update_request.reset(
       UpdateRequest::Create(false, _T("unittest"), _T("unittest"), CString()));
   EXPECT_STREQ(IsDomain() ? kDownloadPreferenceCacheable : _T(""),
                update_request->request().dlpref);
 
   RegKey::DeleteValue(MACHINE_REG_UPDATE_DEV, kRegValueIsEnrolledToDomain);
-  RegKey::DeleteKey(kRegKeyGoopdateGroupPolicy);
 }
 
 }  // namespace xml

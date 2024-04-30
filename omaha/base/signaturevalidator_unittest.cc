@@ -27,98 +27,83 @@ namespace omaha {
 
 namespace {
 
-bool VerifySigneeIsGoogle(const wchar_t* signed_file) {
+const TCHAR* const kTestCertificateSubjectName = _T("Google Inc (TEST)");
+
+bool VerifySigneeIs(const wchar_t* subject_name,
+                    const wchar_t* signed_file) {
   std::vector<CString> subject;
-  subject.push_back(kSha256CertificateSubjectName);
-  subject.push_back(kCertificateSubjectName);
+  subject.push_back(subject_name);
   return SUCCEEDED(
     VerifyCertificate(signed_file,
                       subject,
-                      true,   // Allow test variant.
                       false,  // Check certificate is valid now.
                       NULL));
 }
 
 }  // namespace
 
-// Checks Omaha Thawte certificate sha1 (11/28/2016 to 11/21/2019).
-TEST(CertInfoTest, CertInfo) {
-  const TCHAR kRelativePath[] =
-      _T("unittest_support\\sha1_14F8FDD167F92402B1570B5DC495C815.sys");
+struct PathSubjectThumbprintHash {
+  PathSubjectThumbprintHash() = default;
+  PathSubjectThumbprintHash(const CString& path, const CString& subject,
+                            const CString& thumbprint, const CString& hash)
+      : relative_path(path),
+        subject_name(subject),
+        certificate_thumbprint(thumbprint),
+        public_key_hash(hash) {}
+  PathSubjectThumbprintHash(const PathSubjectThumbprintHash&) = default;
+  PathSubjectThumbprintHash& operator=(const PathSubjectThumbprintHash&) =
+      default;
 
-  CString executable_full_path(app_util::GetCurrentModuleDirectory());
-  ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
-                           kRelativePath));
-  ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  const CString relative_path;
+  const CString subject_name;
+  const CString certificate_thumbprint;
+  const CString public_key_hash;
+};
+
+class CertInfoTest
+    : public ::testing::TestWithParam<PathSubjectThumbprintHash> {};
+
+INSTANTIATE_TEST_CASE_P(
+    PathSubjectThumbprintHash, CertInfoTest,
+    ::testing::Values(
+        // Omaha certificate sha1 (11/07/2019 to 11/16/2022).
+        PathSubjectThumbprintHash(
+            _T("unittest_support\\sha1_06aea76bac46a9e8cfe6d29e45aaf033.sys"),
+            kSha1CertificateSubjectName, kCertificateThumbprint,
+            kCertificatePublicKeyHash),
+        // Google LLC sha256 certificate valid from 07-01-2021 to 07-10-2024.
+        PathSubjectThumbprintHash(
+            _T("unittest_support\\sha2_0e4418e2dede36dd2974c3443afb5ce5.msi"),
+            kSha256CertificateSubjectName,
+            kSha256CertificateThumbprint,
+            kSha256CertificatePublicKeyHash)));
+
+TEST_P(CertInfoTest, CertInfo) {
+  CString binary_full_path(app_util::GetCurrentModuleDirectory());
+  ASSERT_TRUE(::PathAppend(CStrBuf(binary_full_path, MAX_PATH),
+                           GetParam().relative_path));
+  ASSERT_TRUE(File::Exists(binary_full_path));
+  EXPECT_TRUE(VerifySigneeIs(GetParam().subject_name, binary_full_path));
 
   CertList cert_list;
-  ExtractAllCertificatesFromSignature(executable_full_path, &cert_list);
+  ExtractAllCertificatesFromSignature(binary_full_path, GetParam().subject_name,
+                                      &cert_list);
 
-  // ExtractAllCertificatesFromSignature() gets the certificate chain for the
-  // first signature and the certificate chain for the corresponding timestamp,
-  // excluding the root certificates.
-  // The following certificates are enumerated from SaveArguments.exe signed
-  // Thursday, April 14, 2016 3:57:37 PM:
-  // * "Google Inc" hash 1a6ac0549a4a44264deb6ff003391da2f285b19f.
-  // * "Thawte Code Signing CA - G2" hash
-  //   808d62642b7d1c4a9a83fd667f7a2a9d243fb1c7.
-  // * "COMODO SHA-1 Time Stamping Signer" hash
-  //   03a5b14663eb12023091b84a6d6a68bc871de66b.
-  EXPECT_EQ(3, cert_list.size());
+  EXPECT_EQ(1, cert_list.size());
 
   const CertInfo* cert_info = NULL;
   std::vector<CString> subject;
-  subject.push_back(kCertificateSubjectName);
+  subject.push_back(GetParam().subject_name);
   cert_list.FindFirstCert(&cert_info,
                           subject,
                           CString(),
                           CString(),
-                          false,      // Do not allow test variant.
-                          true);      // Check if the certificate is valid now.
+                          /*check_cert_is_valid_now*/ false);
   ASSERT_TRUE(cert_info);
 
-  EXPECT_STREQ(kCertificateSubjectName, cert_info->issuing_company_name_);
-  EXPECT_STREQ(kCertificateThumbprint, cert_info->thumbprint_);
-  EXPECT_STREQ(kCertificatePublicKeyHash, cert_info->public_key_hash_);
-}
-
-// Checks Chrome certificate sha256 (11/06/2018 to 11/17/2021).
-TEST(CertInfoTest, CertInfo_Sha256) {
-  const TCHAR kRelativePath[] =
-      _T("unittest_support\\chrome_setup.exe");
-
-  CString executable_full_path(app_util::GetCurrentModuleDirectory());
-  ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
-                           kRelativePath));
-  ASSERT_TRUE(File::Exists(executable_full_path));
-
-  CertList cert_list;
-  ExtractAllCertificatesFromSignature(executable_full_path, &cert_list);
-
-  // For some reason, extracting all certificates from the file only yields
-  // the code signing certificates but skips the time stamping certificates.
-  // In the case of chrome_setup.exe the following certs are picked up:
-  // * Dummy certificate.
-  // * DigiCert SHA2 Assured ID Code Signing CA
-  //   hash 92c1588e85af2201ce7915e8538b492f605b80c6
-  // * Google LLC hash cb7e84887f3c6015fe7edfb4f8f36df7dc10590e
-  EXPECT_EQ(3, cert_list.size());
-
-  const CertInfo* cert_info = NULL;
-  std::vector<CString> subject;
-  subject.push_back(kSha256CertificateSubjectName);
-  cert_list.FindFirstCert(&cert_info,
-                          subject,
-                          CString(),
-                          CString(),
-                          false,      // Do not allow test variant.
-                          true);      // Check if the certificate is valid now.
-  ASSERT_TRUE(cert_info);
-
-  EXPECT_STREQ(kSha256CertificateSubjectName, cert_info->issuing_company_name_);
-  EXPECT_STREQ(kSha256CertificateThumbprint, cert_info->thumbprint_);
-  EXPECT_STREQ(kSha256CertificatePublicKeyHash, cert_info->public_key_hash_);
+  EXPECT_STREQ(GetParam().subject_name, cert_info->issuing_company_name_);
+  EXPECT_STREQ(GetParam().certificate_thumbprint, cert_info->thumbprint_);
+  EXPECT_STREQ(GetParam().public_key_hash, cert_info->public_key_hash_);
 }
 
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_OfficiallySigned) {
@@ -128,7 +113,8 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_OfficiallySigned) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kSha1CertificateSubjectName,
+                             executable_full_path));
 }
 
 // Tests a certificate subject containing multiple CNs such as:
@@ -142,7 +128,8 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_TestSigned_MultipleCN) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kTestCertificateSubjectName,
+                             executable_full_path));
 }
 
 TEST(SignatureValidatorTest,
@@ -154,7 +141,8 @@ TEST(SignatureValidatorTest,
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kTestCertificateSubjectName,
+                             executable_full_path));
 }
 
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_OmahaTestSigned) {
@@ -165,7 +153,8 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_OmahaTestSigned) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kTestCertificateSubjectName,
+                             executable_full_path));
 }
 
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_Sha256) {
@@ -176,13 +165,15 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_Sha256) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kLegacyCertificateSubjectName,
+                             executable_full_path));
 
   executable_full_path = app_util::GetCurrentModuleDirectory();
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            _T("unittest_support\\chrome_setup.exe")));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kSha256CertificateSubjectName,
+                             executable_full_path));
 }
 
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_DualSigned_Sha1AndSha256) {
@@ -192,20 +183,22 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_DualSigned_Sha1AndSha256) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kLegacyCertificateSubjectName,
+                             executable_full_path));
 }
 
 // The certificate was valid when it was used to sign the executable, but it has
 // since expired.
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_SignedWithNowExpiredCert) {
   const TCHAR kRelativePath[] =
-      _T("unittest_support\\GoogleUpdate_now_expired_cert.exe");
+      _T("unittest_support\\") MAIN_EXE_BASE_NAME _T("_now_expired_cert.exe");
 
   CString executable_full_path(app_util::GetCurrentModuleDirectory());
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_TRUE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_TRUE(VerifySigneeIs(kLegacyCertificateSubjectName,
+                             executable_full_path));
 }
 
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_TestSigned_NoCN) {
@@ -216,7 +209,8 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_TestSigned_NoCN) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_FALSE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_FALSE(VerifySigneeIs(kLegacyCertificateSubjectName,
+                              executable_full_path));
 }
 
 TEST(SignatureValidatorTest, VerifySigneeIsGoogle_TestSigned_WrongCN) {
@@ -227,13 +221,14 @@ TEST(SignatureValidatorTest, VerifySigneeIsGoogle_TestSigned_WrongCN) {
   ASSERT_TRUE(::PathAppend(CStrBuf(executable_full_path, MAX_PATH),
                            kRelativePath));
   ASSERT_TRUE(File::Exists(executable_full_path));
-  EXPECT_FALSE(VerifySigneeIsGoogle(executable_full_path));
+  EXPECT_FALSE(VerifySigneeIs(kLegacyCertificateSubjectName,
+                              executable_full_path));
 }
 
 TEST(SignatureValidatorTest, VerifyAuthenticodeSignature) {
   const TCHAR* kFileNamesToVerify[] = {
-    _T("GoogleUpdate_now_expired_cert.exe"),
-    _T("GoogleUpdate_old_signature.exe"),
+    MAIN_EXE_BASE_NAME _T("_now_expired_cert.exe"),
+    MAIN_EXE_BASE_NAME _T("_old_signature.exe"),
     _T("SaveArguments.exe"),
     _T("chrome_setup.exe"),
     _T("sha2_0c15be4a15bb0903c901b1d6c265302f.msi"),

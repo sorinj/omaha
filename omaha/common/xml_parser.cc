@@ -146,20 +146,6 @@ HRESULT VerifyProtocolCompatibility(const CString& actual_version,
 
 }  // namespace
 
-CString ConvertProcessorArchitectureToString(DWORD arch) {
-  switch (arch) {
-    case PROCESSOR_ARCHITECTURE_INTEL:
-      return xml::value::kArchIntel;
-
-    case PROCESSOR_ARCHITECTURE_AMD64:
-      return xml::value::kArchAmd64;
-
-    default:
-      ASSERT1(false);
-      return xml::value::kArchUnknown;
-  }
-}
-
 // The ElementHandler classes should also be in an anonymous namespace but
 // the base class cannot be because it is used in the header file.
 
@@ -1464,22 +1450,31 @@ HRESULT XmlParser::BuildUpdateCheckElement(const request::App& app,
     }
   }
 
-  if (!app.update_check.target_version_prefix.IsEmpty()) {
-    // RollbackToTargetVersion only applies if the TargetVersionPrefix is set.
-    if (app.update_check.is_rollback_allowed) {
-      hr = AddXMLAttributeNode(element,
-                               kXmlNamespace,
-                               xml::attribute::kRollbackAllowed,
-                               xml::value::kTrue);
-      if (FAILED(hr)) {
-        return hr;
-      }
+  if (app.update_check.is_rollback_allowed) {
+    hr = AddXMLAttributeNode(element,
+                             kXmlNamespace,
+                             xml::attribute::kRollbackAllowed,
+                             xml::value::kTrue);
+    if (FAILED(hr)) {
+      return hr;
     }
+  }
 
+  if (!app.update_check.target_version_prefix.IsEmpty()) {
     hr = AddXMLAttributeNode(element,
                              kXmlNamespace,
                              xml::attribute::kTargetVersionPrefix,
                              app.update_check.target_version_prefix);
+    if (FAILED(hr)) {
+      return hr;
+    }
+  }
+
+  if (!app.update_check.target_channel.IsEmpty()) {
+    hr = AddXMLAttributeNode(element,
+                             kXmlNamespace,
+                             xml::attribute::kTargetChannel,
+                             app.update_check.target_channel);
     if (FAILED(hr)) {
       return hr;
     }

@@ -52,6 +52,7 @@ HRESULT UpdateAppOnDemand(bool is_machine,
 
 HRESULT InstallApps(bool is_machine,
                     bool is_interactive,
+                    bool always_launch_cmd,
                     bool is_eula_accepted,
                     bool is_oem_install,
                     bool is_offline,
@@ -61,6 +62,13 @@ HRESULT InstallApps(bool is_machine,
                     const CString& install_source,
                     const CString& session_id,
                     bool* has_ui_been_displayed);
+
+HRESULT InstallForceInstallApps(bool is_machine,
+                                bool is_interactive,
+                                const CString& install_source,
+                                const CString& display_language,
+                                const CString& session_id,
+                                bool* has_ui_been_displayed);
 
 HRESULT UpdateAllApps(bool is_machine,
                       bool is_interactive,

@@ -17,7 +17,9 @@
 
 #include <ntddndis.h>
 #include <winioctl.h>
+#include <atlpath.h>
 #include <atlsecurity.h>
+#include <atlstr.h>
 
 #include "omaha/base/app_util.h"
 #include "omaha/base/const_addresses.h"
@@ -37,7 +39,6 @@
 #include "omaha/base/scope_guard.h"
 #include "omaha/base/scoped_impersonation.h"
 #include "omaha/base/service_utils.h"
-#include "omaha/base/signatures.h"
 #include "omaha/base/string.h"
 #include "omaha/base/system.h"
 #include "omaha/base/system_info.h"
@@ -359,20 +360,34 @@ CString GetInstalledShellVersion(bool is_machine) {
 }
 
 HRESULT StartGoogleUpdateWithArgs(bool is_machine,
+                                  StartMode start_mode,
                                   const TCHAR* args,
                                   HANDLE* process) {
-  CORE_LOG(L3, (_T("[StartGoogleUpdateWithArgs][%d][%s]"),
-                is_machine, args ? args : _T("")));
+  CORE_LOG(L3, (_T("[StartGoogleUpdateWithArgs][%d][%d][%s]"),
+                is_machine, start_mode, args ? args : _T("")));
 
   CString exe_path = BuildGoogleUpdateExePath(is_machine);
 
   CORE_LOG(L3, (_T("[command line][%s][%s]"), exe_path, args ? args : _T("")));
 
-  HRESULT hr = System::ShellExecuteProcess(exe_path, args, NULL, process);
+  PROCESS_INFORMATION pi = {0};
+  HRESULT hr = start_mode == StartMode::kForeground ?
+                   System::ShellExecuteProcess(exe_path, args, NULL, process) :
+                   System::StartProcessWithArgsAndInfo(exe_path, args, &pi);
   if (FAILED(hr)) {
     CORE_LOG(LE, (_T("[can't start process][%s][0x%08x]"), exe_path, hr));
     return hr;
   }
+
+  if (start_mode != StartMode::kForeground) {
+    if (process) {
+      *process = pi.hProcess;
+    } else {
+      ::CloseHandle(pi.hProcess);
+    }
+    ::CloseHandle(pi.hThread);
+  }
+
   return S_OK;
 }
 
@@ -682,7 +697,7 @@ HRESULT RegisterTypeLibForUser(ITypeLib* lib,
   // help_dir can be NULL.
 
   const TCHAR* library_name = _T("oleaut32.dll");
-  scoped_library module(static_cast<HINSTANCE>(::LoadLibrary(library_name)));
+  scoped_library module(LoadSystemLibrary(library_name));
   if (!module) {
     HRESULT hr = HRESULTFromLastError();
     CORE_LOG(LEVEL_ERROR,
@@ -721,7 +736,7 @@ HRESULT UnRegisterTypeLibForUser(REFGUID lib_id,
   CORE_LOG(L3, (_T("[UnRegisterTypeLibForUser]")));
 
   const TCHAR* library_name = _T("oleaut32.dll");
-  scoped_library module(static_cast<HINSTANCE>(::LoadLibrary(library_name)));
+  scoped_library module(LoadSystemLibrary(library_name));
   if (!module) {
     HRESULT hr = HRESULTFromLastError();
     CORE_LOG(LEVEL_ERROR,
@@ -1271,7 +1286,7 @@ HRESULT OpenUniqueEventFromEnvironment(const CString& var_name,
   return S_OK;
 }
 
-// The caller is responsible for reseting the event and closing the handle.
+// The caller is responsible for resetting the event and closing the handle.
 HRESULT CreateEvent(NamedObjectAttributes* event_attr, HANDLE* event_handle) {
   ASSERT1(event_handle);
   ASSERT1(event_attr);
@@ -1376,22 +1391,25 @@ HRESULT WriteNameValuePairsToHandle(const HANDLE file_handle,
 bool IsAppInstallWorkerRunning(bool is_machine) {
   CORE_LOG(L3, (_T("[IsAppInstallWorkerRunning][%d]"), is_machine));
   std::vector<uint32> processes;
-  VERIFY1(SUCCEEDED(GetInstallWorkerProcesses(is_machine, &processes)));
+  VERIFY_SUCCEEDED(GetInstallWorkerProcesses(is_machine, &processes));
   return !processes.empty();
 }
 
-HRESULT WriteInstallerDataToTempFile(const CString& installer_data,
+HRESULT WriteInstallerDataToTempFile(const CPath& directory,
+                                     const CString& installer_data,
                                      CString* installer_data_file_path) {
   ASSERT1(installer_data_file_path);
 
+  CORE_LOG(L2, (_T("[WriteInstallerDataToTempFile][directory=%s][data=%s]"),
+                directory.m_strPath, installer_data));
+
   // TODO(omaha): consider eliminating the special case and simply create an
   // empty file.
-  CORE_LOG(L2, (_T("[WriteInstallerDataToTempFile][data=%s]"), installer_data));
-  if (installer_data.IsEmpty()) {
+  if (!directory.IsDirectory() || installer_data.IsEmpty()) {
     return S_FALSE;
   }
 
-  CString temp_file = GetTempFilename(_T("gui"));
+  CString temp_file = GetTempFilenameAt(directory, _T("gui"));
   if (temp_file.IsEmpty()) {
     HRESULT hr = HRESULTFromLastError();
     CORE_LOG(LE, (_T("[::GetTempFilename failed][0x08%x]"), hr));
@@ -1434,14 +1452,15 @@ DEFINE_METRIC_integer(last_checked);
 HRESULT UpdateLastChecked(bool is_machine) {
   // Set the last check value to the current value.
   DWORD now = Time64ToInt32(GetCurrent100NSTime());
-  CORE_LOG(L3, (_T("[UpdateLastChecked][now %d]"), now));
 
   metric_last_checked = now;
   HRESULT hr = ConfigManager::Instance()->SetLastCheckedTime(is_machine, now);
   if (FAILED(hr)) {
-    CORE_LOG(LE, (_T("[SetLastCheckedTime failed][0x%08x]"), hr));
+    OPT_LOG(LE, (_T("[SetLastCheckedTime failed][0x%08x]"), hr));
     return hr;
   }
+
+  OPT_LOG(L1, (_T("[UpdateLastChecked][now %d]"), now));
   return S_OK;
 }
 
@@ -1464,7 +1483,7 @@ HANDLE GetImpersonationTokenForMachineProcess(bool is_machine) {
   }
 
   bool is_local_system(false);
-  VERIFY1(SUCCEEDED(IsSystemProcess(&is_local_system)));
+  VERIFY_SUCCEEDED(IsSystemProcess(&is_local_system));
   if (!is_local_system) {
     return NULL;
   }
@@ -1554,7 +1573,7 @@ HRESULT GetMacHashesViaNDIS(std::vector<CString>* mac_hashes) {
     }
 
     DWORD query = OID_802_3_PERMANENT_ADDRESS;
-    BYTE mac_address[6];
+    char mac_address[6];
     DWORD mac_size = sizeof(mac_address);
     if (!::DeviceIoControl(get(file_handle),
                            IOCTL_NDIS_QUERY_GLOBAL_STATS,
@@ -1570,11 +1589,11 @@ HRESULT GetMacHashesViaNDIS(std::vector<CString>* mac_hashes) {
       continue;
     }
 
-    std::vector<byte> mac_address_buffer(arraysize(mac_address));
-    ::memcpy(&mac_address_buffer.front(), mac_address, arraysize(mac_address));
-
     CStringA hashed_mac_address;
-    Base64::Encode(mac_address_buffer, &hashed_mac_address, false);
+    Base64Escape(mac_address,
+                 arraysize(mac_address),
+                 &hashed_mac_address,
+                 true);
     mac_hashes->push_back(AnsiToWideString(hashed_mac_address,
                                            hashed_mac_address.GetLength()));
   }
@@ -1604,7 +1623,7 @@ HRESULT ResetMacHashesInRegistry(bool is_machine,
   ASSERT1(!mac_hashes.empty());
 
   GLock user_id_lock;
-  VERIFY1(SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock)));
+  VERIFY_SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock));
   __mutexScope(user_id_lock);
 
   const ConfigManager& config_manager = *ConfigManager::Instance();
@@ -1613,7 +1632,7 @@ HRESULT ResetMacHashesInRegistry(bool is_machine,
   reg_path = AppendRegKeyPath(reg_path, kRegSubkeyUserId);
 
   // Delete any leftover/old MAC hashes.
-  VERIFY1(SUCCEEDED(RegKey::DeleteKey(reg_path)));
+  VERIFY_SUCCEEDED(RegKey::DeleteKey(reg_path));
 
   RegKey reg_key_uid;
   DWORD disposition = 0;
@@ -1671,23 +1690,23 @@ HRESULT ResetUserIdIfMacMismatch(bool is_machine) {
 
 HRESULT ResetUserId(bool is_machine, bool is_legacy) {
   GLock user_id_lock;
-  VERIFY1(SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock)));
+  VERIFY_SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock));
   __mutexScope(user_id_lock);
 
   RegKey update_key;
-  VERIFY1(SUCCEEDED(update_key.Open(
-      ConfigManager::Instance()->registry_update(is_machine))));
+  VERIFY_SUCCEEDED(update_key.Open(
+      ConfigManager::Instance()->registry_update(is_machine)));
   if (update_key.HasValue(kRegValueOldUserId)) {
-    VERIFY1(SUCCEEDED(update_key.DeleteValue(kRegValueUserId)));
+    VERIFY_SUCCEEDED(update_key.DeleteValue(kRegValueUserId));
   } else {
-    VERIFY1(SUCCEEDED(update_key.RenameValue(kRegValueUserId,
-                                             kRegValueOldUserId)));
+    VERIFY_SUCCEEDED(update_key.RenameValue(kRegValueUserId,
+                                             kRegValueOldUserId));
 
     if (is_legacy) {
       CString uid;
-      VERIFY1(SUCCEEDED(update_key.GetValue(kRegValueOldUserId, &uid)));
+      VERIFY_SUCCEEDED(update_key.GetValue(kRegValueOldUserId, &uid));
       uid.Append(kRegValueDataLegacyUserId);
-      VERIFY1(SUCCEEDED(update_key.SetValue(kRegValueOldUserId, uid)));
+      VERIFY_SUCCEEDED(update_key.SetValue(kRegValueOldUserId, uid));
     }
   }
 
@@ -1697,15 +1716,15 @@ HRESULT ResetUserId(bool is_machine, bool is_legacy) {
 void RecordNewUserIdCreated(const RegKey& update_key) {
   // UID creation timestamp.
   DWORD now = Time64ToInt32(GetCurrent100NSTime());
-  VERIFY1(SUCCEEDED(update_key.SetValue(kRegValueUserIdCreateTime, now)));
+  VERIFY_SUCCEEDED(update_key.SetValue(kRegValueUserIdCreateTime, now));
   CORE_LOG(L3, (_T("[New UID creation time: %d]"), now));
 
   // Increment number of UID rotations.
   DWORD num_rotations(0);
   update_key.GetValue(kRegValueUserIdNumRotations, &num_rotations);
   ++num_rotations;
-  VERIFY1(SUCCEEDED(update_key.SetValue(kRegValueUserIdNumRotations,
-                                        num_rotations)));
+  VERIFY_SUCCEEDED(update_key.SetValue(kRegValueUserIdNumRotations,
+                                        num_rotations));
 }
 
 DEFINE_METRIC_count(opt_in_uid_generated);
@@ -1717,7 +1736,7 @@ HRESULT CreateUserId(bool is_machine) {
   }
 
   GLock user_id_lock;
-  VERIFY1(SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock)));
+  VERIFY_SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock));
   __mutexScope(user_id_lock);
 
   RegKey update_key;
@@ -1766,7 +1785,7 @@ void DeleteUserId(bool is_machine) {
   }
 
   GLock user_id_lock;
-  VERIFY1(SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock)));
+  VERIFY_SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock));
   __mutexScope(user_id_lock);
 
   RegKey update_key;
@@ -1776,9 +1795,9 @@ void DeleteUserId(bool is_machine) {
     return;
   }
 
-  VERIFY1(SUCCEEDED(update_key.DeleteValue(kRegValueUserId)));
-  VERIFY1(SUCCEEDED(update_key.DeleteValue(kRegValueOldUserId)));
-  VERIFY1(SUCCEEDED(update_key.DeleteSubKey(kRegSubkeyUserId)));
+  VERIFY_SUCCEEDED(update_key.DeleteValue(kRegValueUserId));
+  VERIFY_SUCCEEDED(update_key.DeleteValue(kRegValueOldUserId));
+  VERIFY_SUCCEEDED(update_key.DeleteSubKey(kRegSubkeyUserId));
 }
 
 CString GetUserIdLazyInit(bool is_machine) {
@@ -1805,7 +1824,7 @@ CString GetUserIdLazyInit(bool is_machine) {
 
 CString GetUserIdHistory(bool is_machine) {
   GLock user_id_lock;
-  VERIFY1(SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock)));
+  VERIFY_SUCCEEDED(InitializeUserIdLock(is_machine, &user_id_lock));
   __mutexScope(user_id_lock);
 
   CString old_uid;

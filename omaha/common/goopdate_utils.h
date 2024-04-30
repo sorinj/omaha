@@ -34,6 +34,10 @@ class NetworkRequest;
 class UpdateResponse;
 struct NamedObjectAttributes;
 
+// The enum for the values of the |start_mode| parameter for the function
+// StartGoogleUpdateWithArgs().
+enum class StartMode { kForeground, kBackground };
+
 // Represents the Result of an attempt to terminate the browser.
 struct TerminateBrowserResult {
   TerminateBrowserResult()
@@ -85,10 +89,10 @@ CString GetHKRoot();
 CString GetInstalledShellVersion(bool is_machine);
 
 // Starts an instance of the Google Update version found in the registry.
-// Only use to start interactive processes because it uses ::ShellExecuteEx().
 // args can be NULL.
 // process can be NULL. If not NULL, caller is responsible for closing handle.
 HRESULT StartGoogleUpdateWithArgs(bool is_machine,
+                                  StartMode start_mode,
                                   const TCHAR* args,
                                   HANDLE* process);
 
@@ -243,10 +247,11 @@ HRESULT WriteNameValuePairsToHandle(const HANDLE file_handle,
 bool IsAppInstallWorkerRunning(bool is_machine);
 
 // Converts the installer_data value to UTF8. Then writes this UTF8 data
-// prefixed with the UTF8 BOM of EF BB BF to a temp file. Returns the path to
-// temp file that was created.  The returned path will be quote-enclosed by
-// EnclosePath().
-HRESULT WriteInstallerDataToTempFile(const CString& installer_data,
+// prefixed with the UTF8 BOM of EF BB BF to a temp file in `directory`. Returns
+// the path to temp file that was created.  The returned path will be
+// quote-enclosed by EnclosePath().
+HRESULT WriteInstallerDataToTempFile(const CPath& directory,
+                                     const CString& installer_data,
                                      CString* installer_data_file_path);
 
 // Updates LastChecked to now. Call after successful update check for all apps.

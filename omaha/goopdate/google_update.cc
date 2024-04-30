@@ -31,6 +31,7 @@
 #include "omaha/goopdate/google_update3.h"
 #include "omaha/goopdate/omaha3_idl_datax.h"
 #include "omaha/goopdate/ondemand.h"
+#include "omaha/goopdate/policy_status.h"
 #include "omaha/goopdate/process_launcher.h"
 #include "omaha/goopdate/update3web.h"
 #include "omaha/goopdate/worker.h"
@@ -40,6 +41,7 @@ namespace omaha {
 // Template arguments need to be non-const TCHAR arrays.
 TCHAR kOnDemandMachineBrokerProgId[] = kProgIDOnDemandMachine;
 TCHAR kUpdate3WebMachineBrokerProgId[] = kProgIDUpdate3WebMachine;
+TCHAR kPolicyStatusMachineBrokerProgId[] = kProgIDPolicyStatusMachine;
 TCHAR kHKRootUser[] = _T("HKCU");
 TCHAR kHKRootMachine[] = _T("HKLM");
 TCHAR kProgIDUpdate3COMClassUserLocal[] = kProgIDUpdate3COMClassUser;
@@ -51,12 +53,14 @@ END_OBJECT_MAP()
 BEGIN_OBJECT_MAP(object_map_broker_machine_mode)
   OBJECT_ENTRY(__uuidof(OnDemandMachineAppsClass), OnDemandMachineBroker)
   OBJECT_ENTRY(__uuidof(GoogleUpdate3WebMachineClass), Update3WebMachineBroker)
+  OBJECT_ENTRY(__uuidof(PolicyStatusMachineClass), PolicyStatusMachineBroker)
   OBJECT_ENTRY(__uuidof(CoCreateAsyncClass), CoCreateAsync)
 END_OBJECT_MAP()
 
 BEGIN_OBJECT_MAP(object_map_ondemand_user_mode)
   OBJECT_ENTRY(__uuidof(GoogleUpdate3WebUserClass), Update3WebUser)
   OBJECT_ENTRY(__uuidof(OnDemandUserAppsClass), OnDemandUser)
+  OBJECT_ENTRY(__uuidof(PolicyStatusUserClass), PolicyStatusUser)
   OBJECT_ENTRY(__uuidof(CredentialDialogUserClass), CredentialDialogUser)
 END_OBJECT_MAP()
 
@@ -67,6 +71,8 @@ BEGIN_OBJECT_MAP(object_map_ondemand_machine_mode)
                OnDemandMachineFallback)
   OBJECT_ENTRY(__uuidof(GoogleUpdate3WebMachineFallbackClass),
                Update3WebMachineFallback)
+  OBJECT_ENTRY(__uuidof(PolicyStatusMachineFallbackClass),
+               PolicyStatusMachineFallback)
   OBJECT_ENTRY(__uuidof(CredentialDialogMachineClass), CredentialDialogMachine)
 END_OBJECT_MAP()
 
@@ -240,10 +246,10 @@ HRESULT RegisterOrUnregisterProxies(void* data, bool is_register) {
   CORE_LOG(L3, (_T("[RegisterOrUnregisterProxies][%d][%d]"),
                 is_machine, is_register));
 
-  VERIFY1(SUCCEEDED(RegisterOrUnregisterProxies64(is_machine, is_register)) ||
-                    !is_register);
-  VERIFY1(SUCCEEDED(RegisterOrUnregisterProxies32(is_machine, is_register)) ||
-                    !is_register);
+  HRESULT hr = RegisterOrUnregisterProxies64(is_machine, is_register);
+  VERIFY1(SUCCEEDED(hr) || !is_register);
+  hr = RegisterOrUnregisterProxies32(is_machine, is_register);
+  VERIFY1(SUCCEEDED(hr) || !is_register);
   return S_OK;
 }
 

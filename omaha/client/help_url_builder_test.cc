@@ -17,8 +17,10 @@
 #include <atlpath.h>
 #include <atlsecurity.h>
 #include <atlstr.h>
+
+#include <regex>
 #include <vector>
-#include "omaha/base/atl_regexp.h"
+
 #include "omaha/base/error.h"
 #include "omaha/base/omaha_version.h"
 #include "omaha/base/reg_key.h"
@@ -49,15 +51,17 @@ int VerifyOSInUrl(const CString& url, int* length) {
   ASSERT1(length);
   *length = 0;
 
-  const AtlRE expected_os_string =
-      _T("{(5\\.1)|(5\\.2)|(6\\.0)|(6\\.1)|(6\\.3)|(10\\.0)\\.\\d+\\.\\d+")
-      _T("&sp=(Service%20Pack%20(1|2|3))?}");
+  const std::wregex expected_os_string {
+      _T("(?:5\\.[12]|6\\.[013]|10\\.0)\\.\\d+\\.\\d+")
+      _T("&sp=(?:Service%20Pack%20[123])?")
+  };
 
-  CString os_string;
-  EXPECT_TRUE(AtlRE::PartialMatch(url, expected_os_string, &os_string));
+  std::wcmatch m;
+  EXPECT_TRUE(std::regex_search(url.GetString(), m, expected_os_string));
+  EXPECT_EQ(1, m.size());
 
-  *length = os_string.GetLength();
-  return url.Find(os_string);
+  *length = m.length(0);
+  return url.Find(m.str(0).c_str());
 }
 
 }  // namespace
@@ -354,7 +358,7 @@ TEST_F(HelpUrlBuilderTest, BuildHttpGetString_MultipleApps) {
 TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_User) {
   // The URL has a begin, middle which is OS-specific and not checked, and end.
   const CString kExpectedUrlBegin =
-      _T("https://www.google.com/support/installer/?hl=en-GB&")
+      _T("https://www.") COMPANY_DOMAIN _T("/support/installer/?hl=en-GB&")
       _T("product=%7Btest-user-app-id%7D&error=0x80004005&")
       _T("extra_code=-2147418113&guver=5.6.7.8&m=0&os=");
   const CString kExpectedUrlAfterOs = _T("iid=&brand=&source=gethelp")
@@ -384,7 +388,7 @@ TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_User) {
 TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_Machine) {
   // The URL has a begin, middle which is OS-specific and not checked, and end.
   const CString kExpectedUrlBegin =
-      _T("https://www.google.com/support/installer/?hl=en-GB&")
+      _T("https://www.") COMPANY_DOMAIN _T("/support/installer/?hl=en-GB&")
       _T("product=%7Btest-machine-app-id%7D&error=0x80004004&")
       _T("extra_code=99&guver=5.6.7.8&m=1&os=");
   const CString kExpectedUrlAfterOs =
@@ -417,7 +421,7 @@ TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_Machine) {
 TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_InstallerErrorWithExtraCode) {
   // The URL has a begin, middle which is OS-specific and not checked, and end.
   const CString kExpectedUrlBegin =
-      _T("https://www.google.com/support/installer/?hl=en-GB&")
+      _T("https://www.") COMPANY_DOMAIN _T("/support/installer/?hl=en-GB&")
       _T("product=AppName&error=1666&from_extra_code=1&")
       _T("guver=5.6.7.8&m=1&os=");
   const CString kExpectedUrlAfterOs =
@@ -450,7 +454,7 @@ TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_InstallerErrorWithExtraCode) {
 TEST_F(HelpUrlBuilderTest, BuildGetHelpUrl_InstallerErrorWithoutExtraCode) {
   // The URL has a begin, middle which is OS-specific and not checked, and end.
   const CString kExpectedUrlBegin =
-      _T("https://www.google.com/support/installer/?hl=en-GB&")
+      _T("https://www.") COMPANY_DOMAIN _T("/support/installer/?hl=en-GB&")
       _T("product=AppName&error=0x80040902&extra_code=0&")
       _T("guver=5.6.7.8&m=1&os=");
   const CString kExpectedUrlAfterOs =
